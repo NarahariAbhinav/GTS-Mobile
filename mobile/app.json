@@ -5,13 +5,13 @@
     "owner": "abhinav031",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/GTS_Logo.png",
     "userInterfaceStyle": "light",
     "plugins": [
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-icon.png",
+          "image": "./assets/GTS_Logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
@@ -24,7 +24,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/GTS_Logo.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.abhinav031.GTS"
