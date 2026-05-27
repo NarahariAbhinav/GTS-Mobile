@@ -2,6 +2,7 @@
   "expo": {
     "name": "GTS",
     "slug": "GTS",
+    "owner": "abhinav031",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -23,6 +24,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fe74aaab-311f-4e36-93de-2508f0846d96"
+      }
     }
   }
 }
