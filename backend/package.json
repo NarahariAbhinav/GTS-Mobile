@@ -1,0 +1,26 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.10.0",
+    "resend": "^6.12.3",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1",
+    "twilio": "^6.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
