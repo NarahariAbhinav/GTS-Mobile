@@ -663,8 +663,6 @@ app.get('/api/notifications/:employeeId', async (req, res) => {
     try {
         const snapshot = await db.collection('notifications')
             .where('user_id', '==', req.params.employeeId)
-            .orderBy('created_at', 'desc')
-            .limit(50)
             .get();
 
         const rows = snapshot.docs.map(doc => {
@@ -675,7 +673,14 @@ app.get('/api/notifications/:employeeId', async (req, res) => {
                 created_at: data.created_at?.toDate?.() || data.created_at
             };
         });
-        res.json(rows);
+        
+        // Sort in memory to avoid Firestore composite index requirement
+        rows.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        
+        // Limit to 50
+        const limitedRows = rows.slice(0, 50);
+
+        res.json(limitedRows);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

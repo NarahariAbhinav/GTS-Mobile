@@ -1,9 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Modal, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getEmployees, addEmployee, updateEmployee, deleteEmployee } from '../utils/api';
+import { getEmployees, addEmployee, updateEmployee, deleteEmployee, getMySamples } from '../utils/api';
 import { useFocusEffect } from '@react-navigation/native';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { COLORS } from '../utils/theme';
 
@@ -18,6 +18,8 @@ export default function EmployeeMasterScreen() {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
   const [form, setForm] = useState({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '' });
+  const [employeeSamples, setEmployeeSamples] = useState<any[]>([]);
+  const [samplesLoading, setSamplesLoading] = useState(false);
 
   const fetchEmployees = async () => {
     try { const data = await getEmployees(); setEmployees(data); applyFilters('', 'All', data); }
@@ -44,11 +46,20 @@ export default function EmployeeMasterScreen() {
 
   const departments = ['All', ...Array.from(new Set(employees.map(e => e.department).filter(Boolean)))];
 
-  const openAdd = () => { setEditItem(null); setForm({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '' }); setModalVisible(true); };
-  const openEdit = (item: any) => {
+  const openAdd = () => { setEditItem(null); setEmployeeSamples([]); setForm({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '' }); setModalVisible(true); };
+  const openEdit = async (item: any) => {
     setEditItem(item);
     setForm({ employee_name: item.employee_name, department: item.department, designation: item.designation || '', phone_number: item.phone_number || '', email: item.email || '', password: '' });
     setModalVisible(true);
+    setSamplesLoading(true);
+    try {
+      const samples = await getMySamples(item.id);
+      setEmployeeSamples(samples);
+    } catch (e) {
+      setEmployeeSamples([]);
+    } finally {
+      setSamplesLoading(false);
+    }
   };
 
   const handleSave = async () => {
@@ -175,6 +186,33 @@ export default function EmployeeMasterScreen() {
                 <TextInput style={styles.input} value={form.designation} onChangeText={(t) => setForm({ ...form, designation: t })} placeholder="e.g. Floor Supervisor" placeholderTextColor={COLORS.placeholder} />
                 <Text style={styles.fieldLabel}>Phone Number</Text>
                 <TextInput style={styles.input} value={form.phone_number} onChangeText={(t) => setForm({ ...form, phone_number: t })} placeholder="e.g. 9876543210" placeholderTextColor={COLORS.placeholder} keyboardType="phone-pad" />
+                
+                {/* Employee Samples Tracking feature */}
+                {editItem && (
+                  <View style={styles.samplesBox}>
+                    <View style={styles.samplesBoxHeader}>
+                      <Feather name="box" size={16} color={COLORS.denimDark} />
+                      <Text style={styles.samplesBoxTitle}>Holding {employeeSamples.length} Sample(s)</Text>
+                    </View>
+                    {samplesLoading ? <ActivityIndicator color={COLORS.copper} style={{ marginVertical: 10 }} /> : (
+                       employeeSamples.map(s => (
+                         <View key={s.id} style={styles.sampleItem}>
+                           <View style={{ flex: 1 }}>
+                             <Text style={styles.sampleItemName}>{s.sample_name}</Text>
+                             <Text style={styles.sampleItemSub}>{s.style_number} • {s.developed_for || 'No Brand'}</Text>
+                           </View>
+                           <View style={styles.sampleItemStatus}>
+                             <Text style={styles.sampleItemStatusText}>{s.status}</Text>
+                           </View>
+                         </View>
+                       ))
+                    )}
+                    {!samplesLoading && employeeSamples.length === 0 && (
+                      <Text style={styles.samplesBoxEmpty}>This employee has no samples right now.</Text>
+                    )}
+                  </View>
+                )}
+
                 {/* Email & Password — only shown when ADDING new employee */}
                 {!editItem && (
                   <>
@@ -314,4 +352,22 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 12, marginBottom: 14,
   },
   authNoteText: { flex: 1, fontSize: 11, color: COLORS.muted, lineHeight: 16 },
+
+  samplesBox: {
+    backgroundColor: COLORS.cream,
+    borderRadius: 12, padding: 14, marginBottom: 16,
+    borderWidth: 1, borderColor: COLORS.divider,
+  },
+  samplesBoxHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
+  samplesBoxTitle: { fontSize: 14, fontWeight: '700', color: COLORS.denimDark },
+  sampleItem: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#fff', padding: 10, borderRadius: 8, marginBottom: 8,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  sampleItemName: { fontSize: 13, fontWeight: '700', color: COLORS.dark },
+  sampleItemSub: { fontSize: 11, color: COLORS.muted, marginTop: 2 },
+  sampleItemStatus: { backgroundColor: '#eef3f7', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6 },
+  sampleItemStatusText: { fontSize: 9, fontWeight: '700', color: COLORS.denimDark },
+  samplesBoxEmpty: { fontSize: 12, color: COLORS.muted, fontStyle: 'italic', textAlign: 'center', marginVertical: 8 },
 });

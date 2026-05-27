@@ -24,12 +24,15 @@ export default function DashboardScreen({ navigation }: any) {
 
   const fetchData = async () => {
     try {
-      const promises: Promise<any>[] = [getDashboardStats(), getSamples()];
-      if (user?.id) promises.push(getNotifications(user.id));
+      const promises: Promise<any>[] = [
+        getDashboardStats().catch(() => ({ totalSamples: 0, totalEmployees: 0, inTransit: 0, pendingQA: 0, pendingTransfers: 0 })),
+        getSamples().catch(() => [])
+      ];
+      if (user?.id) promises.push(getNotifications(user.id).catch(() => []));
       
       const results = await Promise.all(promises);
       setStats(results[0]);
-      setRecentSamples(results[1].slice(0, 3));
+      setRecentSamples((results[1] || []).slice(0, 3));
       if (results[2]) setNotifications(results[2]);
     } catch (error) { console.error(error); }
     finally { setLoading(false); }
