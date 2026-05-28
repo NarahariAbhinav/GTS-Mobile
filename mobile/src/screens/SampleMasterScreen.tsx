@@ -111,9 +111,14 @@ export default function SampleMasterScreen({ navigation }: any) {
   const [barcodeModal, setBarcodeModal] = useState<any>(null);
   const [editItem, setEditItem] = useState<any>(null);
   const [form, setForm] = useState({ sample_name: '', style_number: '', developed_for: '' });
+  const [showBrandSuggestions, setShowBrandSuggestions] = useState(false);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const PAGE_SIZE = 50;
+
+  const uniqueBrands = Array.from(new Set(samples.map((s: any) => s.developed_for).filter((b: any) => b && b.trim() !== '')));
 
   const handleImportExcel = async () => {
     try {
@@ -144,7 +149,7 @@ export default function SampleMasterScreen({ navigation }: any) {
             try {
               const res = await bulkAddSamples(samples);
               fetchSamples();
-              Alert.alert('Success! 🎉', `${res.created} samples imported successfully!`);
+              Alert.alert('Import Complete', `Imported: ${res.created}\nSkipped (Duplicates): ${res.skipped}`);
             } catch (err: any) {
               Alert.alert('Error', err.message);
             } finally { setImporting(false); }
@@ -256,45 +261,136 @@ export default function SampleMasterScreen({ navigation }: any) {
     }
   };
 
-  const renderItem = ({ item, index }: any) => (
-    <View style={styles.row}>
-      <Text style={styles.rowNum}>{index + 1}</Text>
-      <View style={styles.rowMain}>
-        <Text style={styles.rowTitle}>{item.sample_name}</Text>
-        <Text style={styles.rowSub}>{item.style_number}</Text>
-      </View>
-      <View style={styles.rowMid}><Text style={styles.rowBrand}>{item.developed_for || '—'}</Text></View>
-      {/* Label chip button */}
-      <TouchableOpacity style={styles.labelChip} onPress={() => setBarcodeModal(item)}>
-        <Feather name="tag" size={12} color={COLORS.denim} />
-        <Text style={styles.labelChipText}>Label</Text>
+  const toggleSelection = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedIds(newSet);
+  };
+
+  const handleBulkPrint = async () => {
+    if (selectedIds.size === 0) {
+      Alert.alert('No Selection', 'Please select at least one sample to print.');
+      return;
+    }
+    try {
+      const selectedSamples = samples.filter(s => selectedIds.has(s.id));
+      const pagesHtml = selectedSamples.map(sample => {
+        const bars = encodeCode128(sample.style_number);
+        const totalBars = bars.length;
+        const bw = (280 / totalBars).toFixed(2);
+        const rectsHtml = bars.map((on, i) => on ? `<rect x="${(i * (280 / totalBars)).toFixed(2)}" y="0" width="${bw}" height="70" fill="#000"/>` : '').join('');
+        return `
+        <div style="page-break-after: always; display:flex; justify-content:center; align-items:center; height:100vh;">
+          <div class="label" style="border:2px solid #222;border-radius:10px;padding:20px 24px;width:300px;text-align:center;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:2px;color:#555;margin-bottom:8px;text-transform:uppercase;">GTS — Garment Tracker</div>
+            <div style="font-size:16px;font-weight:800;color:#111;margin-bottom:4px;">${sample.sample_name}</div>
+            <div style="font-size:12px;color:#555;margin-bottom:14px;">For: ${sample.developed_for || '—'}</div>
+            <svg xmlns="http://www.w3.org/2000/svg" width="280" height="70" viewBox="0 0 280 70" style="display:block;margin:0 auto 8px;">${rectsHtml}</svg>
+            <div style="font-size:13px;font-weight:600;letter-spacing:1.5px;color:#333;">${sample.style_number}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>body{margin:0;background:#fff;font-family:Arial,sans-serif;}</style></head><body>${pagesHtml}</body></html>`;
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+      
+      if (Platform.OS === 'android') {
+        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        if (permissions.granted) {
+          const pdfBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+          const newUri = await FileSystem.StorageAccessFramework.createFileAsync(permissions.directoryUri, `Bulk_Labels_${Date.now()}`, 'application/pdf');
+          await FileSystem.writeAsStringAsync(newUri, pdfBase64, { encoding: FileSystem.EncodingType.Base64 });
+          Alert.alert('Saved! ✅', 'Bulk labels saved as PDF.');
+        } else {
+          await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+        }
+      } else {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+      }
+
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to generate bulk PDF.');
+    }
+  };
+
+  const renderItem = ({ item, index }: any) => {
+    const isSelected = selectedIds.has(item.id);
+    return (
+      <TouchableOpacity 
+        style={[styles.row, isSelected && { backgroundColor: '#eef2ff' }]} 
+        onPress={() => selectionMode ? toggleSelection(item.id) : null}
+        onLongPress={() => {
+          if (!selectionMode) {
+            setSelectionMode(true);
+            setSelectedIds(new Set([item.id]));
+          }
+        }}
+        activeOpacity={selectionMode ? 0.7 : 1}
+      >
+        {selectionMode ? (
+          <View style={{ width: 30, alignItems: 'center' }}>
+            <Feather name={isSelected ? "check-square" : "square"} size={18} color={isSelected ? COLORS.indigo : COLORS.placeholder} />
+          </View>
+        ) : (
+          <Text style={styles.rowNum}>{index + 1}</Text>
+        )}
+        <View style={styles.rowMain}>
+          <Text style={styles.rowTitle}>{item.sample_name}</Text>
+          <Text style={styles.rowSub}>{item.style_number}</Text>
+        </View>
+        <View style={styles.rowMid}><Text style={styles.rowBrand}>{item.developed_for || '—'}</Text></View>
+        {/* Label chip button */}
+        <TouchableOpacity style={styles.labelChip} onPress={() => setBarcodeModal(item)}>
+          <Feather name="tag" size={12} color={COLORS.denim} />
+          <Text style={styles.labelChipText}>Label</Text>
+        </TouchableOpacity>
+        {/* Edit icon */}
+        <TouchableOpacity onPress={() => openEdit(item)} style={{ paddingLeft: 8 }}>
+          <Feather name="edit-2" size={14} color={COLORS.muted} />
+        </TouchableOpacity>
       </TouchableOpacity>
-      {/* Edit icon */}
-      <TouchableOpacity onPress={() => openEdit(item)} style={{ paddingLeft: 8 }}>
-        <Feather name="edit-2" size={14} color={COLORS.muted} />
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.pageHeader}>
-        <View>
-          <Text style={styles.pageTitle}>Samples</Text>
-          <Text style={styles.pageSubtitle}>Sample Database</Text>
+      {selectionMode ? (
+        <View style={[styles.pageHeader, { backgroundColor: COLORS.indigo, paddingBottom: 15, borderBottomLeftRadius: 15, borderBottomRightRadius: 15 }]}>
+          <View>
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{selectedIds.size} Selected</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>Bulk Action Mode</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+            <TouchableOpacity onPress={handleBulkPrint} style={{ backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}>
+              <Text style={{ color: COLORS.indigo, fontWeight: '600', fontSize: 13 }}>Generate PDF</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setSelectionMode(false); setSelectedIds(new Set()); }} style={{ paddingHorizontal: 8, paddingVertical: 8 }}>
+              <Text style={{ color: '#fff', fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity style={styles.importBtn} onPress={handleImportExcel} disabled={importing}>
-            {importing
-              ? <ActivityIndicator size="small" color={COLORS.indigo} />
-              : <><Feather name="upload" size={15} color={COLORS.indigo} /><Text style={styles.importBtnText}>Import</Text></>}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
-            <Feather name="plus" size={18} color="#fff" />
-            <Text style={styles.addBtnText}>New</Text>
-          </TouchableOpacity>
+      ) : (
+        <View style={styles.pageHeader}>
+          <View>
+            <Text style={styles.pageTitle}>Samples</Text>
+            <Text style={styles.pageSubtitle}>Sample Database</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity style={styles.importBtn} onPress={handleImportExcel} disabled={importing}>
+              {importing
+                ? <ActivityIndicator size="small" color={COLORS.indigo} />
+                : <><Feather name="upload" size={15} color={COLORS.indigo} /><Text style={styles.importBtnText}>Import</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
+              <Feather name="plus" size={18} color="#fff" />
+              <Text style={styles.addBtnText}>New</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
 
       <View style={styles.searchBar}>
         <Feather name="search" size={16} color={COLORS.placeholder} />
@@ -356,9 +452,26 @@ export default function SampleMasterScreen({ navigation }: any) {
                 <Text style={styles.fieldLabel}>Developed For (Brand)</Text>
                 <TextInput
                   style={styles.input} value={form.developed_for}
-                  onChangeText={(t) => setForm({ ...form, developed_for: t })}
+                  onChangeText={(t) => { setForm({ ...form, developed_for: t }); setShowBrandSuggestions(true); }}
+                  onFocus={() => setShowBrandSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowBrandSuggestions(false), 200)}
                   placeholder="e.g. Zara" placeholderTextColor={COLORS.placeholder}
                 />
+                {showBrandSuggestions && (
+                  (() => {
+                    const filtered = uniqueBrands.filter((b: any) => b.toLowerCase().includes(form.developed_for.toLowerCase()));
+                    if (filtered.length === 0 || (filtered.length === 1 && filtered[0] === form.developed_for)) return null;
+                    return (
+                      <View style={styles.suggestionsContainer}>
+                        {filtered.slice(0, 5).map((b: any, idx: number) => (
+                          <TouchableOpacity key={idx} style={styles.suggestionItem} onPress={() => { setForm({...form, developed_for: b}); setShowBrandSuggestions(false); }}>
+                            <Text style={styles.suggestionText}>{b}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    );
+                  })()
+                )}
                 {/* Barcode preview in form */}
                 {form.style_number.trim().length > 0 && (
                   <View style={styles.barcodePreviewBox}>
@@ -493,6 +606,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cream, borderWidth: 1, borderColor: COLORS.border,
     borderRadius: 12, padding: 14, marginBottom: 14, fontSize: 15, color: COLORS.dark,
   },
+  suggestionsContainer: {
+    backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: COLORS.border,
+    marginTop: -10, marginBottom: 14, overflow: 'hidden', elevation: 2,
+  },
+  suggestionItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: COLORS.divider },
+  suggestionText: { fontSize: 14, color: COLORS.dark },
 
   // Barcode preview inside form
   barcodePreviewBox: {

@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, ScrollView, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, ScrollView, Platform, StatusBar, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getTimeline, getSamples } from '../utils/api';
+import { getTimeline, getSamples, cancelTransfer } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../utils/theme';
@@ -36,9 +37,25 @@ function fmtTime(val: any): string {
 
 export default function TimelineScreen({ route, navigation }: any) {
   const { sampleId, sampleName } = route.params;
+  const { user } = useAuth();
   const [sampleDetails, setSampleDetails] = useState<any>(route.params.sampleDetails || null);
   const [timeline, setTimeline] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const handleCancelTransfer = (transactionId: string) => {
+    Alert.alert('Cancel Transfer', 'Are you sure you want to cancel this transfer?', [
+      { text: 'No', style: 'cancel' },
+      { text: 'Yes, Cancel', style: 'destructive', onPress: async () => {
+          try {
+            await cancelTransfer(transactionId);
+            const historyData = await getTimeline(sampleId);
+            setTimeline(historyData);
+          } catch (e: any) {
+            Alert.alert('Error', e.message || 'Failed to cancel transfer');
+          }
+      }}
+    ]);
+  };
 
   // useFocusEffect re-runs every time this screen becomes visible
   // so after a handover, coming back here instantly shows the updated data
@@ -160,33 +177,41 @@ export default function TimelineScreen({ route, navigation }: any) {
                     <View style={[styles.tlEvent, isLatest && styles.tlEventActive]}>
                       <View style={styles.tlEventHeader}>
                         <Text style={styles.tlEventTitle}>
-                          {item.from_employee_name
+                          {item.transfer_status === 'Edited' ? 'Admin updated sample details' :
+                           item.from_employee_name
                             ? `${item.from_employee_name} → ${item.to_employee_name}`
                             : `Assigned to ${item.to_employee_name}`}
                         </Text>
                         {/* Transfer Status Badge */}
-                        {item.transfer_status && (
+                        {item.transfer_status && item.transfer_status !== 'Edited' && (
                           <View style={[styles.tlStatusBadge, getTransferStatusBg(item.transfer_status)]}>
                             <Text style={[styles.tlStatusText, getTransferStatusFg(item.transfer_status)]}>
-                              {item.transfer_status === 'Accepted' ? '✓ Verified' : item.transfer_status === 'Rejected' ? '✗ Rejected' : '⏳ Pending'}
+                              {item.transfer_status === 'Accepted' ? '✓ Verified' : item.transfer_status === 'Rejected' ? '✗ Rejected' : item.transfer_status === 'Cancelled' ? '🚫 Cancelled' : '⏳ Pending'}
                             </Text>
                           </View>
                         )}
                       </View>
                       <Text style={styles.tlDept}>{item.department}</Text>
                       {item.remarks ? (
-                        <Text style={styles.tlRemark}>"{item.remarks}"</Text>
+                        <Text style={styles.tlRemark}>{item.transfer_status === 'Edited' ? item.remarks : `"${item.remarks}"`}</Text>
                       ) : null}
                       {item.rejection_reason ? (
                         <Text style={styles.tlRejectReason}>Reason: "{item.rejection_reason}"</Text>
                       ) : null}
                       <Text style={styles.tlDate}>
-                        Sent: {fmtDate(item.handover_date)}{'  '}{fmtTime(item.handover_date)}
+                        {item.transfer_status === 'Edited' ? 'Edited on:' : 'Sent:'} {fmtDate(item.handover_date)}{'  '}{fmtTime(item.handover_date)}
                       </Text>
                       {item.accepted_at && (
                         <Text style={styles.tlVerified}>
                           ✓ Accepted: {fmtDate(item.accepted_at)} {fmtTime(item.accepted_at)}
                         </Text>
+                      )}
+                      
+                      {/* Cancel Button */}
+                      {item.transfer_status === 'Pending' && user && user.id === item.from_employee_id && (
+                        <TouchableOpacity style={{ marginTop: 10, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: COLORS.rejectedBg, borderRadius: 6 }} onPress={() => handleCancelTransfer(item.id)}>
+                          <Text style={{ color: COLORS.rejected, fontSize: 12, fontWeight: '600' }}>Cancel Transfer</Text>
+                        </TouchableOpacity>
                       )}
                     </View>
                   </View>
@@ -229,12 +254,12 @@ function getStatusDotColor(status: string) {
 
 function getTransferStatusBg(status: string) {
   if (status === 'Accepted') return { backgroundColor: COLORS.verifiedBg };
-  if (status === 'Rejected') return { backgroundColor: COLORS.rejectedBg };
+  if (status === 'Rejected' || status === 'Cancelled') return { backgroundColor: COLORS.rejectedBg };
   return { backgroundColor: COLORS.pendingBg };
 }
 function getTransferStatusFg(status: string) {
   if (status === 'Accepted') return { color: COLORS.verified };
-  if (status === 'Rejected') return { color: COLORS.rejected };
+  if (status === 'Rejected' || status === 'Cancelled') return { color: COLORS.rejected };
   return { color: '#92400e' };
 }
 

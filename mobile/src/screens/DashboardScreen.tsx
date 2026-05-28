@@ -1,12 +1,12 @@
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '../context/AuthContext';
-import { getDashboardStats, getSamples, sendDailyReportEmail, getNotifications } from '../utils/api';
+import { getDashboardStats, getSamples, sendDailyReportEmail, getNotifications, sendExcelReportEmail } from '../utils/api';
 import { COLORS } from '../utils/theme';
 
 export default function DashboardScreen({ navigation }: any) {
@@ -15,6 +15,7 @@ export default function DashboardScreen({ navigation }: any) {
   const [recentSamples, setRecentSamples] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleLogout = () => {
@@ -22,7 +23,8 @@ export default function DashboardScreen({ navigation }: any) {
     navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] }));
   };
 
-  const fetchData = async () => {
+  const fetchData = async (isRefresh = false) => {
+    if (!isRefresh && !stats) setLoading(true); // only show full screen loader if no data
     try {
       const promises: Promise<any>[] = [
         getDashboardStats().catch(() => ({ totalSamples: 0, totalEmployees: 0, inTransit: 0, pendingQA: 0, pendingTransfers: 0 })),
@@ -35,10 +37,15 @@ export default function DashboardScreen({ navigation }: any) {
       setRecentSamples((results[1] || []).slice(0, 3));
       if (results[2]) setNotifications(results[2]);
     } catch (error) { console.error(error); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setRefreshing(false); }
   };
 
-  useFocusEffect(useCallback(() => { setLoading(true); fetchData(); }, [user?.id]));
+  useFocusEffect(useCallback(() => { fetchData(); }, [user?.id]));
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchData(true);
+  };
 
   const handleSendReport = async () => {
     const adminEmail = user?.email;
@@ -53,7 +60,11 @@ export default function DashboardScreen({ navigation }: any) {
   };
 
   const handleDownloadExcel = async () => {
+    const adminEmail = user?.email;
+    if (!adminEmail) { Alert.alert('Error', 'Could not find your email address.'); return; }
+
     try {
+      Alert.alert('Generating Excel...', 'Fetching samples for export...');
       const allSamples = await getSamples();
       
       let csvContent = "Sample Name,Style Number,Brand,Status,Current Holder,Department,Created Date\n";
@@ -71,24 +82,10 @@ export default function DashboardScreen({ navigation }: any) {
         csvContent += `${name},${style},${brand},${status},${holder},${dept},${date}\n`;
       });
 
-      // Try saving directly to phone storage (Android SAF)
-      if (Platform.OS === 'android') {
-        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-        if (permissions.granted) {
-          const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
-            permissions.directoryUri, 'GTS_Samples_Report', 'text/csv'
-          );
-          await FileSystem.writeAsStringAsync(fileUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-          Alert.alert('Saved! ✅', 'Report saved to your selected folder.');
-          return;
-        }
-      }
-      // Fallback: share sheet
-      const tempUri = FileSystem.documentDirectory + 'GTS_Samples_Report.csv';
-      await FileSystem.writeAsStringAsync(tempUri, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
-      await Sharing.shareAsync(tempUri, { mimeType: 'text/csv' });
+      await sendExcelReportEmail(adminEmail, csvContent);
+      Alert.alert('Success ✅', `Excel report has been sent to ${adminEmail}!`);
     } catch (err: any) {
-      Alert.alert('Error', 'Failed to generate report: ' + err.message);
+      Alert.alert('Error', 'Failed to email report: ' + err.message);
     }
   };
 
@@ -98,7 +95,11 @@ export default function DashboardScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.copper]} />}
+      >
 
         {/* Header */}
         <View style={styles.header}>
@@ -182,8 +183,8 @@ export default function DashboardScreen({ navigation }: any) {
               <Feather name="download" size={18} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.emailReportTitle}>Download</Text>
-              <Text style={styles.emailReportSub}>Export to Excel</Text>
+              <Text style={styles.emailReportTitle}>Email Excel</Text>
+              <Text style={styles.emailReportSub}>Send via email</Text>
             </View>
           </TouchableOpacity>
         </View>

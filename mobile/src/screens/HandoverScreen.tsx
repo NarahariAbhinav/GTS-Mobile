@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, FlatList, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Modal, FlatList, Alert, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getSamples, getEmployees, transferSample } from '../utils/api';
 import { useFocusEffect } from '@react-navigation/native';
@@ -14,8 +14,9 @@ export default function HandoverScreen({ route, navigation }: any) {
   const [department, setDepartment] = useState('');
   const [remarks, setRemarks] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectionType, setSelectionType] = useState('');
+  const [selectionType, setSelectionType] = useState<'sample' | 'employee'>('sample');
   const [modalSearch, setModalSearch] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -43,6 +44,7 @@ export default function HandoverScreen({ route, navigation }: any) {
       Alert.alert('Missing Fields', 'Please select a sample and an employee.');
       return;
     }
+    setLoading(true);
     try {
       await transferSample({
         sample_id: selectedSample.id,
@@ -57,6 +59,7 @@ export default function HandoverScreen({ route, navigation }: any) {
         }}
       ]);
     } catch (error) { Alert.alert('Error', 'Failed to transfer sample'); }
+    finally { setLoading(false); }
   };
 
   const getFilteredModalData = () => {
@@ -91,9 +94,18 @@ export default function HandoverScreen({ route, navigation }: any) {
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.formContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <View style={styles.labelRow}>
-            <Feather name="box" size={14} color={COLORS.copper} />
-            <Text style={styles.fieldLabel}>Select Sample</Text>
+          <View style={styles.labelRowWithAction}>
+            <View style={styles.labelRow}>
+              <Feather name="box" size={14} color={COLORS.copper} />
+              <Text style={styles.fieldLabel}>Select Sample</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.scanBtnSmall} 
+              onPress={() => navigation.navigate('BarcodeScanner', { samples, returnScreen: 'Handover' })}
+            >
+              <Feather name="maximize" size={12} color="#fff" />
+              <Text style={styles.scanBtnTextSmall}>Scan</Text>
+            </TouchableOpacity>
           </View>
           <TouchableOpacity style={styles.selector} onPress={() => { setSelectionType('sample'); setModalSearch(''); setModalVisible(true); }}>
             <Text style={selectedSample ? styles.selectorText : styles.selectorPlaceholder}>
@@ -136,11 +148,11 @@ export default function HandoverScreen({ route, navigation }: any) {
           <TextInput style={styles.input} value={remarks} onChangeText={setRemarks} placeholder="e.g. Sent for quality review" placeholderTextColor={COLORS.placeholder} multiline />
 
           <TouchableOpacity
-            style={[styles.transferBtn, (!selectedSample || !toEmployee) && styles.transferBtnDisabled]}
-            onPress={handleTransfer} disabled={!selectedSample || !toEmployee} activeOpacity={0.8}
+            style={[styles.transferBtn, (!selectedSample || !toEmployee || loading) && styles.transferBtnDisabled]}
+            onPress={handleTransfer} disabled={!selectedSample || !toEmployee || loading} activeOpacity={0.8}
           >
-            <Feather name="send" size={18} color="#fff" />
-            <Text style={styles.transferBtnText}>Complete Transfer</Text>
+            {loading ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="send" size={18} color="#fff" />}
+            <Text style={styles.transferBtnText}>{loading ? 'Transferring...' : 'Complete Transfer'}</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -198,11 +210,18 @@ const styles = StyleSheet.create({
 
   formContainer: { padding: 20, paddingBottom: 100 },
 
-  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  labelRowWithAction: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   fieldLabel: {
     fontSize: 11, fontWeight: '600', color: COLORS.muted,
     textTransform: 'uppercase', letterSpacing: 0.5,
   },
+  scanBtnSmall: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: COLORS.copper, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
+  },
+  scanBtnTextSmall: { fontSize: 11, fontWeight: '600', color: '#fff' },
+
   selector: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border,

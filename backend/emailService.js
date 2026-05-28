@@ -104,6 +104,39 @@ const sendDailyManagerReport = async (toEmail, totalSamples, pendingQA, inProduc
     }
 };
 
+const sendExcelReport = async (toEmail, csvData) => {
+    if (!resend) {
+        console.warn('Resend is not configured. Missing RESEND_API_KEY in .env');
+        return false;
+    }
+    if (!toEmail) return false;
+
+    try {
+        const { data, error } = await resend.emails.send({
+            from: 'Garment Tracker <onboarding@resend.dev>',
+            to: [toEmail],
+            subject: '📊 Garment Samples Export Report',
+            html: '<p>Hello,</p><p>Please find the requested Garment Samples export attached as a CSV file.</p><p>You can open this file in Microsoft Excel or Google Sheets.</p>',
+            attachments: [
+                {
+                    filename: 'GTS_Samples_Report.csv',
+                    content: Buffer.from(csvData).toString('base64')
+                }
+            ]
+        });
+
+        if (error) {
+            console.error('Error sending Excel Email via Resend:', error);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        console.error('Exception sending Excel Email via Resend:', error);
+        return false;
+    }
+};
+
 module.exports = {
-    sendDailyManagerReport
+    sendDailyManagerReport,
+    sendExcelReport
 };

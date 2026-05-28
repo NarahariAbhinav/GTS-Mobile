@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Modal, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Modal, ScrollView, Alert, KeyboardAvoidingView, Platform, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getEmployees, addEmployee, updateEmployee, deleteEmployee, getMySamples } from '../utils/api';
 import { useFocusEffect } from '@react-navigation/native';
@@ -17,9 +17,11 @@ export default function EmployeeMasterScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
-  const [form, setForm] = useState({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '' });
+  const [form, setForm] = useState({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '', email_report_enabled: false });
   const [employeeSamples, setEmployeeSamples] = useState<any[]>([]);
   const [samplesLoading, setSamplesLoading] = useState(false);
+  const [showAllSamples, setShowAllSamples] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const fetchEmployees = async () => {
     try { const data = await getEmployees(); setEmployees(data); applyFilters('', 'All', data); }
@@ -46,20 +48,27 @@ export default function EmployeeMasterScreen() {
 
   const departments = ['All', ...Array.from(new Set(employees.map(e => e.department).filter(Boolean)))];
 
-  const openAdd = () => { setEditItem(null); setEmployeeSamples([]); setForm({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '' }); setModalVisible(true); };
-  const openEdit = async (item: any) => {
+  const openAdd = () => { setEditItem(null); setEmployeeSamples([]); setForm({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '', email_report_enabled: false }); setModalVisible(true); };
+  const openEdit = (item: any) => {
     setEditItem(item);
-    setForm({ employee_name: item.employee_name, department: item.department, designation: item.designation || '', phone_number: item.phone_number || '', email: item.email || '', password: '' });
-    setModalVisible(true);
+    setForm({ 
+      employee_name: item.employee_name, 
+      email: item.email, 
+      password: '',
+      department: item.department || '',
+      designation: item.designation || '',
+      phone_number: item.phone_number || '',
+      email_report_enabled: item.email_report_enabled || false
+    });
+    setEmployeeSamples([]);
+    setShowAllSamples(false);
     setSamplesLoading(true);
-    try {
-      const samples = await getMySamples(item.id);
-      setEmployeeSamples(samples);
-    } catch (e) {
-      setEmployeeSamples([]);
-    } finally {
-      setSamplesLoading(false);
-    }
+    setModalVisible(true);
+    // Fetch samples
+    getMySamples(item.id)
+      .then(res => setEmployeeSamples(res))
+      .catch(err => console.error(err))
+      .finally(() => setSamplesLoading(false));
   };
 
   const handleSave = async () => {
@@ -68,6 +77,7 @@ export default function EmployeeMasterScreen() {
       alert('Email is required to create a login account.');
       return;
     }
+    setSaving(true);
     try {
       if (editItem) { await updateEmployee(editItem.id, form); }
       else { await addEmployee({ ...form, password: form.password || '1234' }); }
@@ -76,6 +86,8 @@ export default function EmployeeMasterScreen() {
     } catch (error: any) {
       const msg = error?.response?.data?.error || 'Failed to save employee.';
       alert(msg);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -195,7 +207,7 @@ export default function EmployeeMasterScreen() {
                       <Text style={styles.samplesBoxTitle}>Holding {employeeSamples.length} Sample(s)</Text>
                     </View>
                     {samplesLoading ? <ActivityIndicator color={COLORS.copper} style={{ marginVertical: 10 }} /> : (
-                       employeeSamples.map(s => (
+                       (showAllSamples ? employeeSamples : employeeSamples.slice(0, 3)).map(s => (
                          <View key={s.id} style={styles.sampleItem}>
                            <View style={{ flex: 1 }}>
                              <Text style={styles.sampleItemName}>{s.sample_name}</Text>
@@ -206,6 +218,13 @@ export default function EmployeeMasterScreen() {
                            </View>
                          </View>
                        ))
+                    )}
+                    {!samplesLoading && employeeSamples.length > 3 && (
+                      <TouchableOpacity onPress={() => setShowAllSamples(!showAllSamples)} style={{ paddingVertical: 6, alignItems: 'center' }}>
+                        <Text style={{ color: COLORS.copper, fontSize: 13, fontWeight: '600' }}>
+                          {showAllSamples ? 'Show Less' : `+ ${employeeSamples.length - 3} more`}
+                        </Text>
+                      </TouchableOpacity>
                     )}
                     {!samplesLoading && employeeSamples.length === 0 && (
                       <Text style={styles.samplesBoxEmpty}>This employee has no samples right now.</Text>
@@ -226,8 +245,28 @@ export default function EmployeeMasterScreen() {
                     </View>
                   </>
                 )}
-                <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.8}>
-                  <Text style={styles.saveBtnText}>{editItem ? 'Update Employee' : 'Add Employee'}</Text>
+
+                <View style={styles.toggleRow}>
+                  <Text style={styles.toggleLabel}>Enable Email Reports</Text>
+                  <Switch
+                    trackColor={{ false: COLORS.divider, true: COLORS.copper }}
+                    thumbColor={form.email_report_enabled ? '#fff' : '#f4f3f4'}
+                    onValueChange={(val) => setForm({ ...form, email_report_enabled: val })}
+                    value={form.email_report_enabled || false}
+                  />
+                </View>
+
+                <TouchableOpacity 
+                  style={[styles.saveBtn, saving && { opacity: 0.7 }]} 
+                  onPress={handleSave} 
+                  activeOpacity={0.8}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.saveBtnText}>{editItem ? 'Update Employee' : 'Add Employee'}</Text>
+                  )}
                 </TouchableOpacity>
                 {/* Delete button — only visible when editing and user is Admin */}
                 {editItem && isAdmin && (
@@ -352,6 +391,9 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 12, marginBottom: 14,
   },
   authNoteText: { flex: 1, fontSize: 11, color: COLORS.muted, lineHeight: 16 },
+
+  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingHorizontal: 4 },
+  toggleLabel: { fontSize: 14, fontWeight: '600', color: COLORS.dark },
 
   samplesBox: {
     backgroundColor: COLORS.cream,

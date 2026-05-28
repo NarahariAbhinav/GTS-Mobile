@@ -21,11 +21,15 @@ export default function BarcodeScannerScreen({ navigation, route }: any) {
     );
 
     if (match) {
-      navigation.replace('Timeline', {
-        sampleId: match.id,
-        sampleName: match.sample_name,
-        sampleDetails: match,
-      });
+      if (route?.params?.returnScreen === 'Handover') {
+        navigation.navigate('Dashboard', { screen: 'Transfers', params: { prefilledSampleId: match.id } });
+      } else {
+        navigation.replace('Timeline', {
+          sampleId: match.id,
+          sampleName: match.sample_name,
+          sampleDetails: match,
+        });
+      }
     } else {
       Alert.alert(
         'Not Found',

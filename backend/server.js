@@ -101,7 +101,8 @@ app.post('/api/login', async (req, res) => {
                 department: userData.department,
                 designation: userData.designation,
                 role: userData.role,
-                phone_number: userData.phone_number
+                phone_number: userData.phone_number,
+                email_report_enabled: userData.email_report_enabled || false
             }
         });
     } catch (err) {
@@ -164,7 +165,7 @@ app.get('/api/employees', async (req, res) => {
 });
 
 app.post('/api/employees', verifyToken, requireAdmin, async (req, res) => {
-    const { employee_name, department, designation, phone_number, role, password, email } = req.body;
+    const { employee_name, department, designation, phone_number, role, password, email, email_report_enabled } = req.body;
 
     if (!email) {
         return res.status(400).json({ error: 'Email is required to create an employee account.' });
@@ -186,6 +187,7 @@ app.post('/api/employees', verifyToken, requireAdmin, async (req, res) => {
             designation: designation || '',
             phone_number: phone_number || '',
             role: role || 'Employee',
+            email_report_enabled: email_report_enabled || false,
             uid: authUser.uid,
             created_at: new Date()
         });
@@ -198,6 +200,7 @@ app.post('/api/employees', verifyToken, requireAdmin, async (req, res) => {
             designation, 
             phone_number, 
             role: role || 'Employee',
+            email_report_enabled: email_report_enabled || false,
             message: `Firebase account created for ${email}. Default password: ${password || '1234'}`
         });
     } catch (err) {
@@ -210,10 +213,11 @@ app.post('/api/employees', verifyToken, requireAdmin, async (req, res) => {
 });
 
 app.put('/api/employees/:id', verifyToken, requireAdmin, async (req, res) => {
-    const { employee_name, department, designation, phone_number, role } = req.body;
+    const { employee_name, department, designation, phone_number, role, email_report_enabled } = req.body;
     try {
         await db.collection('employees').doc(req.params.id).update({
-            employee_name, department, designation, phone_number, role: role || 'Employee'
+            employee_name, department, designation, phone_number, role: role || 'Employee',
+            email_report_enabled: email_report_enabled !== undefined ? email_report_enabled : false
         });
         res.json({ success: true });
     } catch (err) {
@@ -339,6 +343,19 @@ app.put('/api/samples/:id', async (req, res) => {
         await db.collection('samples').doc(req.params.id).update({
             sample_name, style_number, developed_for: developed_for || ''
         });
+
+        // Audit Log
+        await db.collection('handovers').add({
+            sample_id: req.params.id,
+            from_employee_id: null,
+            to_employee_id: null,
+            department: 'System Update',
+            remarks: `Sample details edited: ${sample_name} (${style_number}) - ${developed_for || 'No Brand'}`,
+            transfer_status: 'Edited',
+            handover_date: new Date(),
+            created_at: new Date()
+        });
+
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -357,23 +374,38 @@ app.post('/api/samples/bulk', verifyToken, requireAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Maximum 500 samples per import.' });
     }
     try {
+        const existingSnap = await db.collection('samples').select('style_number').get();
+        const existingStyles = new Set(existingSnap.docs.map(d => (d.data().style_number || '').toLowerCase()));
+
         const batch = db.batch();
         const results = [];
+        let skipped = 0;
+
         samples.forEach(s => {
-            const ref = db.collection('samples').doc(); // auto-generate ID
+            const style = s.style_number?.trim() || '';
+            if (!style || existingStyles.has(style.toLowerCase())) {
+                skipped++;
+                return;
+            }
+            existingStyles.add(style.toLowerCase());
+
+            const ref = db.collection('samples').doc();
             batch.set(ref, {
-                sample_name: s.sample_name || '',
-                style_number: s.style_number || '',
-                developed_for: s.developed_for || '',
+                sample_name: s.sample_name?.trim() || '',
+                style_number: style,
+                developed_for: s.developed_for?.trim() || '',
                 status: 'In Development',
                 current_holder_id: null,
                 current_department: '',
                 created_at: new Date()
             });
-            results.push({ id: ref.id, style_number: s.style_number, sample_name: s.sample_name });
+            results.push({ id: ref.id, style_number: style, sample_name: s.sample_name });
         });
-        await batch.commit();
-        res.json({ success: true, created: results.length, samples: results });
+
+        if (results.length > 0) {
+            await batch.commit();
+        }
+        res.json({ success: true, created: results.length, skipped, samples: results });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -547,6 +579,53 @@ app.post('/api/handover/:id/reject', async (req, res) => {
 });
 
 // =========================================================
+// CANCEL TRANSFER (By Sender)
+// =========================================================
+app.post('/api/handover/:id/cancel', async (req, res) => {
+    const transactionId = req.params.id;
+    try {
+        const txnRef = db.collection('handovers').doc(transactionId);
+        const txnDoc = await txnRef.get();
+
+        if (!txnDoc.exists || txnDoc.data().transfer_status !== 'Pending') {
+            return res.status(404).json({ error: 'Transaction not found or already processed.' });
+        }
+
+        const txn = txnDoc.data();
+        await txnRef.update({
+            transfer_status: 'Cancelled',
+            rejected_at: new Date(),
+            rejection_reason: 'Sender cancelled the transfer request'
+        });
+
+        // In-App Notification: notify the receiver that it was cancelled
+        if (txn.to_employee_id) {
+            const [senderDoc, sampleDoc] = await Promise.all([
+                txn.from_employee_id ? db.collection('employees').doc(txn.from_employee_id).get() : Promise.resolve(null),
+                db.collection('samples').doc(txn.sample_id).get()
+            ]);
+
+            const senderName = senderDoc?.data()?.employee_name || 'Admin';
+            const sample = sampleDoc.data();
+
+            await db.collection('notifications').add({
+                user_id: txn.to_employee_id,
+                title: 'Transfer Cancelled 🚫',
+                message: `${senderName} cancelled the transfer of "${sample?.sample_name || 'the sample'}".`,
+                type: 'handover_rejected',
+                related_id: txn.sample_id,
+                read: false,
+                created_at: new Date()
+            });
+        }
+
+        res.json({ success: true, message: 'Transfer cancelled successfully.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// =========================================================
 // PENDING TRANSFERS FOR EMPLOYEE
 // =========================================================
 app.get('/api/pending-transfers/:employeeId', async (req, res) => {
@@ -651,6 +730,19 @@ app.post('/api/admin/send-report', async (req, res) => {
 
         await sendDailyManagerReport(email, totalSamples, pendingQA, inProduction, dispatched);
         res.json({ success: true, message: 'Daily report sent successfully via Email!' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/send-excel', async (req, res) => {
+    const { email, csvData } = req.body;
+    if (!email || !csvData) return res.status(400).json({ error: 'Email and CSV data are required.' });
+
+    try {
+        const { sendExcelReport } = require('./emailService');
+        await sendExcelReport(email, csvData);
+        res.json({ success: true, message: 'Excel report sent successfully via Email!' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

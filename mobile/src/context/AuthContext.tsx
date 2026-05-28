@@ -11,6 +11,7 @@ export interface User {
   designation: string;
   role: 'Admin' | 'Employee';
   phone_number?: string;
+  email_report_enabled?: boolean;
 }
 
 interface AuthContextType {

@@ -45,9 +45,9 @@ export default function NotificationsScreen({ navigation }: any) {
     
     // Navigate based on type
     if (item.type === 'handover_pending') {
-      navigation.navigate('MySamples', { screen: 'Pending' });
+      navigation.navigate('Dashboard', { screen: 'Home' });
     } else {
-      navigation.navigate('Tracking');
+      navigation.navigate('Dashboard', { screen: 'Tracking' });
     }
   };
 

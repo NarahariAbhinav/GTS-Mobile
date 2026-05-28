@@ -36,6 +36,11 @@ export const sendDailyReportEmail = async (email: string) => {
     return response.data;
 };
 
+export const sendExcelReportEmail = async (email: string, csvData: string) => {
+    const response = await api.post('/admin/send-excel', { email, csvData });
+    return response.data;
+};
+
 // === EMPLOYEES ===
 export const getEmployees = async () => {
     const response = await api.get('/employees');
@@ -107,6 +112,11 @@ export const acceptTransfer = async (transactionId: string) => {
 
 export const rejectTransfer = async (transactionId: string, rejection_reason?: string) => {
     const response = await api.post(`/handover/${transactionId}/reject`, { rejection_reason });
+    return response.data;
+};
+
+export const cancelTransfer = async (transactionId: string) => {
+    const response = await api.post(`/handover/${transactionId}/cancel`);
     return response.data;
 };
 

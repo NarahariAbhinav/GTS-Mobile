@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getMySamples, getPendingTransfers, rejectTransfer, acceptTransfer } from '../utils/api';
+import { getMySamples, getPendingTransfers, rejectTransfer, acceptTransfer, getSamples, getNotifications, sendExcelReportEmail } from '../utils/api';
 import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -16,12 +16,20 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
   const fetchData = async () => {
     if (!user) return;
     try {
-      const [samples, transfers] = await Promise.all([getMySamples(user.id), getPendingTransfers(user.id)]);
+      const [samples, transfers, notifs] = await Promise.all([
+        getMySamples(user.id), 
+        getPendingTransfers(user.id),
+        getNotifications(user.id).catch(() => [])
+      ]);
       setMySamples(samples);
       setPendingTransfers(transfers);
+      if (notifs) setNotifications(notifs);
     } catch (error) { console.error(error); }
     finally { setLoading(false); }
   };
@@ -67,6 +75,27 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
 
   const handleLogout = () => { logout(); navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] })); };
 
+  const handleDownloadExcel = async () => {
+    const adminEmail = user?.email;
+    if (!adminEmail) { Alert.alert('Error', 'Could not find your email address.'); return; }
+
+    try {
+      Alert.alert('Generating Excel...', 'Fetching samples for export...');
+      const allSamples = await getSamples();
+      
+      let csvContent = "Sample Name,Style Number,Brand,Status,Current Holder,Department,Created Date\n";
+      allSamples.forEach((s: any) => {
+        const dateStr = s.created_at ? new Date(s.created_at).toLocaleDateString() : '';
+        csvContent += `"${s.sample_name || ''}","${s.style_number || ''}","${s.developed_for || ''}","${s.status || ''}","${s.current_holder_name || ''}","${s.current_department || ''}","${dateStr}"\n`;
+      });
+
+      await sendExcelReportEmail(adminEmail, csvContent);
+      Alert.alert('Success ✅', `Excel report has been sent to ${adminEmail}!`);
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to email report: ' + err.message);
+    }
+  };
+
   if (loading) return <View style={styles.loaderContainer}><ActivityIndicator size="large" color={COLORS.copper} /></View>;
 
   return (
@@ -80,9 +109,17 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
               <Text style={styles.welcomeText}>My Workspace</Text>
               <Text style={styles.userName}>{user?.employee_name}</Text>
             </View>
-            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-              <Feather name="log-out" size={18} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity style={styles.logoutBtn} onPress={() => navigation.navigate('Notifications')}>
+                <Feather name="bell" size={18} color="rgba(255,255,255,0.7)" />
+                {unreadCount > 0 && (
+                  <View style={styles.badge}><Text style={styles.badgeText}>{unreadCount}</Text></View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+                <Feather name="log-out" size={18} color="rgba(255,255,255,0.7)" />
+              </TouchableOpacity>
+            </View>
           </View>
           <View style={styles.roleBadge}>
             <Text style={styles.roleBadgeText}>{user?.designation} • {user?.department}</Text>
@@ -103,6 +140,21 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
             <Text style={styles.statLabel}>Pending</Text>
           </View>
         </View>
+
+        {/* Email Report (Conditionally shown if enabled) */}
+        {user?.email_report_enabled && (
+          <View style={styles.reportsContainer}>
+            <TouchableOpacity style={styles.reportBtn} onPress={handleDownloadExcel} activeOpacity={0.8}>
+              <View style={styles.emailReportIcon}>
+                <Feather name="download" size={18} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emailReportTitle}>Email Excel</Text>
+                <Text style={styles.emailReportSub}>Send via email</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Pending Transfers */}
         {pendingTransfers.length > 0 && (
@@ -220,6 +272,12 @@ const styles = StyleSheet.create({
   roleBadge: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, marginTop: 8, alignSelf: 'flex-start' },
   roleBadgeText: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.6)' },
   logoutBtn: { width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  badge: {
+    position: 'absolute', top: -4, right: -4, backgroundColor: '#ef4444',
+    width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: COLORS.indigo,
+  },
+  badgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
 
   statsRow: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.warmWhite, borderRadius: 16,
@@ -231,6 +289,18 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 22, fontWeight: '800', color: COLORS.dark, marginTop: 4 },
   statLabel: { fontSize: 10, fontWeight: '600', color: COLORS.muted, marginTop: 2 },
   statDivider: { width: 1, height: 36, backgroundColor: COLORS.divider },
+
+  reportsContainer: { marginHorizontal: 20, marginTop: 16 },
+  reportBtn: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef3f7',
+    padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#dce6ef',
+  },
+  emailReportIcon: {
+    backgroundColor: COLORS.verified, width: 36, height: 36, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center', marginRight: 10,
+  },
+  emailReportTitle: { fontSize: 13, fontWeight: '700', color: COLORS.dark },
+  emailReportSub: { fontSize: 10, color: COLORS.muted, marginTop: 2 },
 
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, marginTop: 20, paddingHorizontal: 20 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.dark, textTransform: 'uppercase', letterSpacing: 0.5 },
