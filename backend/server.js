@@ -236,9 +236,12 @@ app.delete('/api/employees/:id', verifyToken, requireAdmin, async (req, res) => 
 
         const empData = empDoc.data();
 
-        // 2. Delete Firebase Auth account if UID exists
+        // 2. Delete Firebase Auth account AND revoke tokens if UID exists
+        // ── LOOPHOLE FIX #8: Immediately revoke all sessions so fired employees can't use the app ──
         if (empData.uid) {
             try {
+                await admin.auth().revokeRefreshTokens(empData.uid);
+                console.log(`🔒 Firebase Auth tokens revoked for: ${empData.employee_name}`);
                 await admin.auth().deleteUser(empData.uid);
                 console.log(`🗑️  Firebase Auth account deleted for: ${empData.employee_name}`);
             } catch (authErr) {
@@ -417,6 +420,22 @@ app.post('/api/samples/bulk', verifyToken, requireAdmin, async (req, res) => {
 app.post('/api/handover', async (req, res) => {
     const { sample_id, from_employee_id, to_employee_id, department, remarks } = req.body;
     try {
+        // ── LOOPHOLE FIX #3: Block Self-Transfers ──
+        if (from_employee_id && from_employee_id === to_employee_id) {
+            return res.status(400).json({ error: 'You cannot transfer a sample to yourself.' });
+        }
+
+        // ── LOOPHOLE FIX #7: Rate Limiter — max 3 transfers per sample per hour ──
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        const recentTransfers = await db.collection('handovers')
+            .where('sample_id', '==', sample_id)
+            .where('from_employee_id', '==', from_employee_id || '')
+            .where('created_at', '>=', oneHourAgo)
+            .get();
+        if (recentTransfers.size >= 3) {
+            return res.status(429).json({ error: 'Rate limit exceeded. You can only initiate 3 transfers per sample per hour. Please wait before trying again.' });
+        }
+
         const txnRef = await db.collection('handovers').add({
             sample_id,
             from_employee_id: from_employee_id || null,
@@ -462,6 +481,15 @@ app.post('/api/handover', async (req, res) => {
 app.post('/api/handover/:id/accept', async (req, res) => {
     const transactionId = req.params.id;
     try {
+        // ── SERVER-SIDE BARCODE VERIFICATION ENFORCEMENT ──
+        // The client MUST send verified_by_scan: true, which is only set
+        // after the camera successfully matches the barcode. This prevents
+        // employees from bypassing the scan via any workaround.
+        const { verified_by_scan } = req.body || {};
+        if (!verified_by_scan) {
+            return res.status(403).json({ error: 'Barcode scan verification is required to accept a transfer. Please scan the garment barcode.' });
+        }
+
         const txnRef = db.collection('handovers').doc(transactionId);
         const txnDoc = await txnRef.get();
 
@@ -471,8 +499,8 @@ app.post('/api/handover/:id/accept', async (req, res) => {
 
         const txn = txnDoc.data();
 
-        // Mark as accepted
-        await txnRef.update({ transfer_status: 'Accepted', accepted_at: new Date() });
+        // Mark as accepted (with scan verification audit)
+        await txnRef.update({ transfer_status: 'Accepted', accepted_at: new Date(), verified_by_scan: true });
 
         // Auto-determine status from department
         const autoStatus = getAutoStatus(txn.department);
@@ -550,6 +578,37 @@ app.post('/api/handover/:id/reject', async (req, res) => {
             rejected_at: new Date(),
             rejection_reason: rejection_reason || null
         });
+
+        // ── LOOPHOLE FIX #4: Track excessive rejections ──
+        // Count this employee's rejections in the last 24 hours
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const rejectHistory = await db.collection('handovers')
+            .where('to_employee_id', '==', txn.to_employee_id)
+            .where('transfer_status', '==', 'Rejected')
+            .where('rejected_at', '>=', twentyFourHoursAgo)
+            .get();
+
+        // If employee rejected 3+ transfers today, alert all admins
+        if (rejectHistory.size >= 3) {
+            const rejectorDoc = await db.collection('employees').doc(txn.to_employee_id).get();
+            const rejectorName = rejectorDoc.data()?.employee_name || 'Unknown';
+
+            const adminsSnap = await db.collection('employees').where('role', '==', 'Admin').get();
+            const alertBatch = db.batch();
+            adminsSnap.forEach(adminDoc => {
+                const notifRef = db.collection('notifications').doc();
+                alertBatch.set(notifRef, {
+                    user_id: adminDoc.id,
+                    title: '⚠️ Frequent Rejections Alert',
+                    message: `${rejectorName} has rejected ${rejectHistory.size} transfers in the last 24 hours. This may require attention.`,
+                    type: 'admin_alert',
+                    related_id: txn.to_employee_id,
+                    read: false,
+                    created_at: new Date()
+                });
+            });
+            await alertBatch.commit();
+        }
 
         // In-App Notification: notify the original sender
         if (txn.from_employee_id) {

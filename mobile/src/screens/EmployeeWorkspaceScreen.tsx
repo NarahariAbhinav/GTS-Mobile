@@ -40,27 +40,7 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
     navigation.navigate('VerifyScan', { transactionId: txn.id, expectedStyleNumber: txn.style_number, sampleName: txn.sample_name });
   };
 
-  const handleManualAccept = (txn: any) => {
-    Alert.alert(
-      '✅ Manual Accept',
-      `Accept "${txn.sample_name}" without scanning?\n\nUse this only when the garment has no barcode.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Accept',
-          onPress: async () => {
-            try {
-              await acceptTransfer(txn.id);
-              Alert.alert('Accepted!', `"${txn.sample_name}" is now in your possession.`);
-              fetchData();
-            } catch (error: any) {
-              Alert.alert('Error', error?.response?.data?.error || 'Failed to accept transfer.');
-            }
-          }
-        }
-      ]
-    );
-  };
+  // Manual accept has been removed — barcode scan is now mandatory for all transfers
 
   const openRejectModal = (txnId: string) => { setRejectingId(txnId); setRejectReason(''); setRejectModalVisible(true); };
   const handleReject = async () => {
@@ -189,11 +169,8 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
                   <TouchableOpacity style={styles.rejectBtn} onPress={() => openRejectModal(txn.id)}>
                     <Feather name="x" size={16} color={COLORS.danger} /><Text style={styles.rejectBtnText}>Reject</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.manualAcceptBtn} onPress={() => handleManualAccept(txn)}>
-                    <Feather name="check" size={16} color={COLORS.denim} /><Text style={styles.manualAcceptBtnText}>Manual</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity style={styles.acceptBtn} onPress={() => handleAccept(txn)}>
-                    <Feather name="maximize" size={16} color="#fff" /><Text style={styles.acceptBtnText}>Scan</Text>
+                    <Feather name="maximize" size={16} color="#fff" /><Text style={styles.acceptBtnText}>Scan & Accept</Text>
                   </TouchableOpacity>
                 </View>
               </View>

@@ -106,7 +106,7 @@ export const transferSample = async (data: any) => {
 };
 
 export const acceptTransfer = async (transactionId: string) => {
-    const response = await api.post(`/handover/${transactionId}/accept`);
+    const response = await api.post(`/handover/${transactionId}/accept`, { verified_by_scan: true });
     return response.data;
 };
 
