@@ -198,7 +198,7 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
             </TouchableOpacity>
           ))
         )}
-        <View style={{ height: 30 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
 
       {/* Reject Modal */}

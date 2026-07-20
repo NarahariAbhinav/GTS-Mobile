@@ -494,8 +494,8 @@ export default function SampleMasterScreen({ navigation }: any) {
       </Modal>
 
       {/* ── Barcode View Modal ───────────────────────────────────────── */}
-      {barcodeModal && (
-        <Modal visible={true} animationType="fade" transparent={true}>
+      <Modal visible={!!barcodeModal} animationType="fade" transparent={true} onRequestClose={() => setBarcodeModal(null)}>
+        {barcodeModal && (
           <View style={styles.modalOverlay}>
             <View style={styles.barcodeModalContent}>
               <View style={styles.modalHeader}>
@@ -508,7 +508,7 @@ export default function SampleMasterScreen({ navigation }: any) {
                 <Text style={styles.labelBrand}>GTS — Garment Tracker</Text>
                 <Text style={styles.labelName}>{barcodeModal.sample_name}</Text>
                 <Text style={styles.labelFor}>For: {barcodeModal.developed_for || '—'}</Text>
-                <SvgXml xml={generateBarcodeSVG(barcodeModal.style_number, 260, 70)} width={260} height={70} />
+                <SvgXml xml={generateBarcodeSVG(String(barcodeModal.style_number || ''), 260, 70)} width={260} height={70} />
                 <Text style={styles.labelStyle}>{barcodeModal.style_number}</Text>
               </View>
 
@@ -518,8 +518,8 @@ export default function SampleMasterScreen({ navigation }: any) {
               </TouchableOpacity>
             </View>
           </View>
-        </Modal>
-      )}
+        )}
+      </Modal>
     </SafeAreaView>
   );
 }

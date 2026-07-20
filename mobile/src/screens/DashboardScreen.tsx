@@ -167,27 +167,29 @@ export default function DashboardScreen({ navigation }: any) {
         </View>
 
         {/* Reports Section */}
-        <View style={styles.reportsContainer}>
-          <TouchableOpacity style={styles.reportBtn} onPress={handleSendReport} activeOpacity={0.8}>
-            <View style={styles.emailReportIcon}>
-              <Feather name="mail" size={18} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.emailReportTitle}>Email Report</Text>
-              <Text style={styles.emailReportSub}>Send via email</Text>
-            </View>
-          </TouchableOpacity>
+        {(isAdmin || user?.email_report_enabled) && (
+          <View style={styles.reportsContainer}>
+            <TouchableOpacity style={styles.reportBtn} onPress={handleSendReport} activeOpacity={0.8}>
+              <View style={styles.emailReportIcon}>
+                <Feather name="mail" size={18} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emailReportTitle}>Email Report</Text>
+                <Text style={styles.emailReportSub}>Send via email</Text>
+              </View>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.reportBtn, { marginLeft: 10 }]} onPress={handleDownloadExcel} activeOpacity={0.8}>
-            <View style={[styles.emailReportIcon, { backgroundColor: COLORS.verified }]}>
-              <Feather name="download" size={18} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.emailReportTitle}>Email Excel</Text>
-              <Text style={styles.emailReportSub}>Send via email</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={[styles.reportBtn, { marginLeft: 10 }]} onPress={handleDownloadExcel} activeOpacity={0.8}>
+              <View style={[styles.emailReportIcon, { backgroundColor: COLORS.verified }]}>
+                <Feather name="download" size={18} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emailReportTitle}>Email Excel</Text>
+                <Text style={styles.emailReportSub}>Send via email</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Quick Actions</Text>

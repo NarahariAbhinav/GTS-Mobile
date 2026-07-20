@@ -415,61 +415,124 @@ app.post('/api/samples/bulk', verifyToken, requireAdmin, async (req, res) => {
 });
 
 // =========================================================
-// INITIATE TRANSFER (Handover)
+// INITIATE TRANSFER (Handover / Batch / External Dispatch)
 // =========================================================
 app.post('/api/handover', async (req, res) => {
-    const { sample_id, from_employee_id, to_employee_id, department, remarks } = req.body;
+    let { sample_id, sample_ids, from_employee_id, to_employee_id, department, remarks, is_external, external_vendor, courier_name, awb_number } = req.body;
     try {
-        // ── LOOPHOLE FIX #3: Block Self-Transfers ──
-        if (from_employee_id && from_employee_id === to_employee_id) {
-            return res.status(400).json({ error: 'You cannot transfer a sample to yourself.' });
+        if (!sample_ids && sample_id) {
+            sample_ids = [sample_id];
+        }
+        if (!sample_ids || sample_ids.length === 0) {
+            return res.status(400).json({ error: 'No samples provided for transfer.' });
         }
 
-        // ── LOOPHOLE FIX #7: Rate Limiter — max 3 transfers per sample per hour ──
+        if (!is_external && from_employee_id && from_employee_id === to_employee_id) {
+            return res.status(400).json({ error: 'You cannot transfer samples to yourself.' });
+        }
+
+        const batch = db.batch();
+        let skipped = 0;
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-        const recentTransfers = await db.collection('handovers')
-            .where('sample_id', '==', sample_id)
-            .where('from_employee_id', '==', from_employee_id || '')
-            .where('created_at', '>=', oneHourAgo)
-            .get();
-        if (recentTransfers.size >= 3) {
-            return res.status(429).json({ error: 'Rate limit exceeded. You can only initiate 3 transfers per sample per hour. Please wait before trying again.' });
+        const transactionIds = [];
+
+        for (const s_id of sample_ids) {
+            const recentTransfersSnap = await db.collection('handovers')
+                .where('sample_id', '==', s_id)
+                .get();
+            
+            const recentCount = recentTransfersSnap.docs.filter(doc => {
+                const data = doc.data();
+                const senderMatches = (data.from_employee_id || '') === (from_employee_id || '');
+                const isRecent = data.created_at && data.created_at.toDate() >= oneHourAgo;
+                return senderMatches && isRecent;
+            }).length;
+
+            if (recentCount >= 3) {
+                skipped++;
+                continue; 
+            }
+
+            const txnRef = db.collection('handovers').doc();
+            transactionIds.push(txnRef.id);
+            
+            if (is_external) {
+                batch.set(txnRef, {
+                    sample_id: s_id,
+                    from_employee_id: from_employee_id || null,
+                    to_employee_id: 'EXTERNAL',
+                    department: 'External Vendor / Courier',
+                    remarks: remarks || '',
+                    is_external: true,
+                    external_vendor: external_vendor || '',
+                    courier_name: courier_name || '',
+                    awb_number: awb_number || '',
+                    transfer_status: 'Accepted',
+                    handover_date: new Date(),
+                    accepted_at: new Date(),
+                    created_at: new Date()
+                });
+
+                const sampleRef = db.collection('samples').doc(s_id);
+                batch.update(sampleRef, {
+                    current_holder_id: 'EXTERNAL',
+                    current_holder_name: 'External: ' + external_vendor,
+                    current_department: 'Dispatched via ' + courier_name + (awb_number ? ' (AWB: ' + awb_number + ')' : ''),
+                    status: 'Dispatched Externally'
+                });
+
+            } else {
+                batch.set(txnRef, {
+                    sample_id: s_id,
+                    from_employee_id: from_employee_id || null,
+                    to_employee_id,
+                    department,
+                    remarks: remarks || '',
+                    transfer_status: 'Pending',
+                    handover_date: new Date(),
+                    accepted_at: null,
+                    rejected_at: null,
+                    rejection_reason: null,
+                    created_at: new Date()
+                });
+            }
         }
 
-        const txnRef = await db.collection('handovers').add({
-            sample_id,
-            from_employee_id: from_employee_id || null,
-            to_employee_id,
-            department,
-            remarks: remarks || '',
-            transfer_status: 'Pending',
-            handover_date: new Date(),
-            accepted_at: null,
-            rejected_at: null,
-            rejection_reason: null,
-            created_at: new Date()
+        if (transactionIds.length === 0) {
+            return res.status(429).json({ error: 'Rate limit exceeded for all selected samples.' });
+        }
+
+        await batch.commit();
+
+        if (!is_external) {
+            const senderDoc = from_employee_id ? await db.collection('employees').doc(from_employee_id).get() : null;
+            const senderName = senderDoc?.data()?.employee_name || 'Admin';
+
+            const firstSampleDoc = await db.collection('samples').doc(sample_ids[0]).get();
+            const firstSampleName = firstSampleDoc.data()?.sample_name || 'Item';
+            
+            let message = `${senderName} wants to transfer "${firstSampleName}" to you.`;
+            if (sample_ids.length > 1) {
+                message = `${senderName} wants to transfer ${sample_ids.length} samples to you.`;
+            }
+
+            const notifRef = db.collection('notifications').doc();
+            await notifRef.set({
+                user_id: to_employee_id,
+                title: 'New Transfer Pending',
+                message: message,
+                type: 'handover_pending',
+                related_id: transactionIds[0],
+                read: false,
+                created_at: new Date()
+            });
+        }
+
+        res.json({ 
+            success: true, 
+            message: is_external ? 'External dispatch recorded successfully.' : `Transfer initiated for ${transactionIds.length} sample(s).`,
+            skipped 
         });
-
-        // In-App Notification: notify the receiver
-        const [sampleDoc, senderDoc] = await Promise.all([
-            db.collection('samples').doc(sample_id).get(),
-            from_employee_id ? db.collection('employees').doc(from_employee_id).get() : Promise.resolve(null)
-        ]);
-
-        const sample = sampleDoc.data();
-        const senderName = senderDoc?.data()?.employee_name || 'Admin';
-
-        await db.collection('notifications').add({
-            user_id: to_employee_id,
-            title: 'New Transfer Pending',
-            message: `${senderName} wants to transfer "${sample.sample_name}" to you.`,
-            type: 'handover_pending',
-            related_id: txnRef.id,
-            read: false,
-            created_at: new Date()
-        });
-
-        res.json({ success: true, transactionId: txnRef.id, message: 'Transfer initiated. Awaiting receiver acceptance.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -582,14 +645,18 @@ app.post('/api/handover/:id/reject', async (req, res) => {
         // ── LOOPHOLE FIX #4: Track excessive rejections ──
         // Count this employee's rejections in the last 24 hours
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const rejectHistory = await db.collection('handovers')
+        const rejectHistorySnap = await db.collection('handovers')
             .where('to_employee_id', '==', txn.to_employee_id)
             .where('transfer_status', '==', 'Rejected')
-            .where('rejected_at', '>=', twentyFourHoursAgo)
             .get();
 
+        const recentRejectsCount = rejectHistorySnap.docs.filter(doc => {
+            const data = doc.data();
+            return data.rejected_at && data.rejected_at.toDate() >= twentyFourHoursAgo;
+        }).length;
+
         // If employee rejected 3+ transfers today, alert all admins
-        if (rejectHistory.size >= 3) {
+        if (recentRejectsCount >= 3) {
             const rejectorDoc = await db.collection('employees').doc(txn.to_employee_id).get();
             const rejectorName = rejectorDoc.data()?.employee_name || 'Unknown';
 
@@ -774,11 +841,22 @@ app.get('/api/samples/:id/history', async (req, res) => {
 // =========================================================
 // EMAIL DAILY REPORT
 // =========================================================
-app.post('/api/admin/send-report', async (req, res) => {
+app.post('/api/admin/send-report', verifyToken, async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email address is required.' });
 
     try {
+        const empSnap = await db.collection('employees').where('email', '==', req.user.email).limit(1).get();
+        if (empSnap.empty) return res.status(403).json({ error: 'User profile not found.' });
+        const empDoc = empSnap.docs[0].data();
+        
+        if (empDoc.role !== 'Admin' && !empDoc.email_report_enabled) {
+             return res.status(403).json({ error: 'You do not have permission to send reports.' });
+        }
+        if (email.toLowerCase() !== req.user.email.toLowerCase() && empDoc.role !== 'Admin') {
+             return res.status(403).json({ error: 'You can only send reports to your own email address.' });
+        }
+
         const samplesSnap = await db.collection('samples').get();
         const samples = samplesSnap.docs.map(d => d.data());
 
@@ -794,11 +872,22 @@ app.post('/api/admin/send-report', async (req, res) => {
     }
 });
 
-app.post('/api/admin/send-excel', async (req, res) => {
+app.post('/api/admin/send-excel', verifyToken, async (req, res) => {
     const { email, csvData } = req.body;
     if (!email || !csvData) return res.status(400).json({ error: 'Email and CSV data are required.' });
 
     try {
+        const empSnap = await db.collection('employees').where('email', '==', req.user.email).limit(1).get();
+        if (empSnap.empty) return res.status(403).json({ error: 'User profile not found.' });
+        const empDoc = empSnap.docs[0].data();
+        
+        if (empDoc.role !== 'Admin' && !empDoc.email_report_enabled) {
+             return res.status(403).json({ error: 'You do not have permission to send reports.' });
+        }
+        if (email.toLowerCase() !== req.user.email.toLowerCase() && empDoc.role !== 'Admin') {
+             return res.status(403).json({ error: 'You can only send reports to your own email address.' });
+        }
+
         const { sendExcelReport } = require('./emailService');
         await sendExcelReport(email, csvData);
         res.json({ success: true, message: 'Excel report sent successfully via Email!' });

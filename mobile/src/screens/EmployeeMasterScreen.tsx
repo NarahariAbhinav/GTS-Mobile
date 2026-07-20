@@ -38,7 +38,7 @@ export default function EmployeeMasterScreen() {
     }
     if (text) {
       const q = text.toLowerCase();
-      result = result.filter((i: any) => i.employee_name.toLowerCase().includes(q) || i.department.toLowerCase().includes(q));
+      result = result.filter((i: any) => (i.employee_name || '').toString().toLowerCase().includes(q) || (i.department || '').toString().toLowerCase().includes(q));
     }
     setFiltered(result);
   };

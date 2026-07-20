@@ -64,8 +64,8 @@ export default function TrackingScreen({ navigation }: any) {
     if (text) {
       const q = text.toLowerCase();
       result = result.filter((item: any) =>
-        item.sample_name.toLowerCase().includes(q) ||
-        item.style_number.toLowerCase().includes(q) ||
+        (item.sample_name || '').toLowerCase().includes(q) ||
+        (item.style_number || '').toString().toLowerCase().includes(q) ||
         (item.current_holder_name && item.current_holder_name.toLowerCase().includes(q)) ||
         (item.current_department && item.current_department.toLowerCase().includes(q))
       );

@@ -17,6 +17,12 @@
           "backgroundColor": "#ffffff"
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow GTS to access your camera to scan garment barcodes."
+        }
+      ],
       "expo-font"
     ],
     "ios": {

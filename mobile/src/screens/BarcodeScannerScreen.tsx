@@ -1,13 +1,16 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Vibration } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Feather } from '@expo/vector-icons';
+import { COLORS } from '../utils/theme';
 
 export default function BarcodeScannerScreen({ navigation, route }: any) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [scannedSamples, setScannedSamples] = useState<any[]>([]);
   const samples = route?.params?.samples || [];
+  const batchMode = route?.params?.batchMode || false;
 
   const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
     if (scanned) return;
@@ -17,18 +20,26 @@ export default function BarcodeScannerScreen({ navigation, route }: any) {
 
     // Match against style_number
     const match = samples.find((s: any) =>
-      s.style_number.toLowerCase() === scannedValue.toLowerCase()
+      (s.style_number || '').toString().toLowerCase() === (scannedValue || '').toString().toLowerCase()
     );
 
     if (match) {
-      if (route?.params?.returnScreen === 'Handover') {
-        navigation.navigate('Dashboard', { screen: 'Transfers', params: { prefilledSampleId: match.id } });
+      Vibration.vibrate(50);
+      if (batchMode) {
+        if (!scannedSamples.find(s => s.id === match.id)) {
+          setScannedSamples(prev => [...prev, match]);
+        }
+        setTimeout(() => setScanned(false), 1200);
       } else {
-        navigation.replace('Timeline', {
-          sampleId: match.id,
-          sampleName: match.sample_name,
-          sampleDetails: match,
-        });
+        if (route?.params?.returnScreen === 'Handover') {
+          navigation.navigate('Dashboard', { screen: 'Transfers', params: { prefilledSampleIds: [match.id] } });
+        } else {
+          navigation.replace('Timeline', {
+            sampleId: match.id,
+            sampleName: match.sample_name,
+            sampleDetails: match,
+          });
+        }
       }
     } else {
       Alert.alert(
@@ -36,6 +47,16 @@ export default function BarcodeScannerScreen({ navigation, route }: any) {
         `No sample found for barcode: "${scannedValue}"`,
         [{ text: 'Scan Again', onPress: () => setScanned(false) }]
       );
+    }
+  };
+
+  const handleBatchDone = () => {
+    if (scannedSamples.length === 0) {
+      navigation.goBack();
+      return;
+    }
+    if (route?.params?.returnScreen === 'Handover') {
+      navigation.navigate('Dashboard', { screen: 'Transfers', params: { prefilledSampleIds: scannedSamples.map(s => s.id) } });
     }
   };
 
@@ -87,7 +108,7 @@ export default function BarcodeScannerScreen({ navigation, route }: any) {
           <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
             <Feather name="x" size={22} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.topTitle}>Scan Barcode</Text>
+          <Text style={styles.topTitle}>{batchMode ? 'Batch Scan Mode' : 'Scan Barcode'}</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -99,16 +120,30 @@ export default function BarcodeScannerScreen({ navigation, route }: any) {
             <View style={[styles.corner, styles.cornerBL]} />
             <View style={[styles.corner, styles.cornerBR]} />
           </View>
+          {scanned && batchMode && (
+             <View style={styles.scannedToast}>
+                <Feather name="check-circle" size={20} color="#10b981" />
+                <Text style={styles.scannedToastText}>Scanned!</Text>
+             </View>
+          )}
         </View>
 
         {/* Bottom Hint */}
         <View style={styles.bottomHint}>
-          <Text style={styles.hintText}>
-            Point camera at the barcode on the garment tag
-          </Text>
-          <Text style={styles.hintSub}>
-            Supports QR, EAN, Code128, Code39, UPC
-          </Text>
+          {batchMode ? (
+            <TouchableOpacity style={styles.doneBtn} onPress={handleBatchDone}>
+              <Text style={styles.doneBtnText}>Done ({scannedSamples.length} Scanned)</Text>
+            </TouchableOpacity>
+          ) : (
+            <>
+              <Text style={styles.hintText}>
+                Point camera at the barcode on the garment tag
+              </Text>
+              <Text style={styles.hintSub}>
+                Supports QR, EAN, Code128, Code39, UPC
+              </Text>
+            </>
+          )}
         </View>
       </SafeAreaView>
     </View>
@@ -159,6 +194,11 @@ const styles = StyleSheet.create({
   cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
   cornerBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3 },
   cornerBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3 },
+  scannedToast: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginTop: 24
+  },
+  scannedToastText: { color: '#10b981', fontWeight: 'bold', marginLeft: 8 },
 
   // Bottom Hint
   bottomHint: {
@@ -166,4 +206,6 @@ const styles = StyleSheet.create({
   },
   hintText: { fontSize: 14, color: '#fff', fontWeight: '500', textAlign: 'center' },
   hintSub: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 6 },
+  doneBtn: { backgroundColor: COLORS.copper, paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, width: '100%', alignItems: 'center' },
+  doneBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' }
 });

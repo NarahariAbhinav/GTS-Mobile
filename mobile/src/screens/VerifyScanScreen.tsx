@@ -19,7 +19,7 @@ export default function VerifyScanScreen({ navigation, route }: any) {
     const scannedValue = data.trim();
 
     // Verify: scanned barcode must match the expected style number
-    if (scannedValue.toLowerCase() === expectedStyleNumber.toLowerCase()) {
+    if ((scannedValue || '').toString().toLowerCase() === (expectedStyleNumber || '').toString().toLowerCase()) {
       setProcessing(true);
       try {
         await acceptTransfer(transactionId);
