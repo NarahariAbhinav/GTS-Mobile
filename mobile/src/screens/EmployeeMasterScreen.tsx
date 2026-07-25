@@ -17,7 +17,7 @@ export default function EmployeeMasterScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
-  const [form, setForm] = useState({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '', email_report_enabled: false });
+  const [form, setForm] = useState({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '', email_report_enabled: false, role: 'Employee' });
   const [employeeSamples, setEmployeeSamples] = useState<any[]>([]);
   const [samplesLoading, setSamplesLoading] = useState(false);
   const [showAllSamples, setShowAllSamples] = useState(false);
@@ -48,7 +48,7 @@ export default function EmployeeMasterScreen() {
 
   const departments = ['All', ...Array.from(new Set(employees.map(e => e.department).filter(Boolean)))];
 
-  const openAdd = () => { setEditItem(null); setEmployeeSamples([]); setForm({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '', email_report_enabled: false }); setModalVisible(true); };
+  const openAdd = () => { setEditItem(null); setEmployeeSamples([]); setForm({ employee_name: '', department: '', designation: '', phone_number: '', email: '', password: '', email_report_enabled: false, role: 'Employee' }); setModalVisible(true); };
   const openEdit = (item: any) => {
     setEditItem(item);
     setForm({ 
@@ -58,7 +58,8 @@ export default function EmployeeMasterScreen() {
       department: item.department || '',
       designation: item.designation || '',
       phone_number: item.phone_number || '',
-      email_report_enabled: item.email_report_enabled || false
+      email_report_enabled: item.email_report_enabled || false,
+      role: item.role || 'Employee'
     });
     setEmployeeSamples([]);
     setShowAllSamples(false);
@@ -246,6 +247,22 @@ export default function EmployeeMasterScreen() {
                   </>
                 )}
 
+                <Text style={styles.fieldLabel}>System Role</Text>
+                <View style={styles.roleSelector}>
+                  <TouchableOpacity 
+                    style={[styles.roleOption, form.role === 'Employee' && styles.roleOptionActive]}
+                    onPress={() => setForm({ ...form, role: 'Employee' })}
+                  >
+                    <Text style={[styles.roleOptionText, form.role === 'Employee' && styles.roleOptionTextActive]}>Employee</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.roleOption, form.role === 'Admin' && styles.roleOptionActive]}
+                    onPress={() => setForm({ ...form, role: 'Admin' })}
+                  >
+                    <Text style={[styles.roleOptionText, form.role === 'Admin' && styles.roleOptionTextActive]}>Admin</Text>
+                  </TouchableOpacity>
+                </View>
+
                 <View style={styles.toggleRow}>
                   <Text style={styles.toggleLabel}>Enable Email Reports</Text>
                   <Switch
@@ -256,18 +273,23 @@ export default function EmployeeMasterScreen() {
                   />
                 </View>
 
-                <TouchableOpacity 
-                  style={[styles.saveBtn, saving && { opacity: 0.7 }]} 
-                  onPress={handleSave} 
-                  activeOpacity={0.8}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={styles.saveBtnText}>{editItem ? 'Update Employee' : 'Add Employee'}</Text>
-                  )}
-                </TouchableOpacity>
+                <View style={styles.actionRow}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)} disabled={saving}>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.saveBtn, saving && { opacity: 0.7 }]} 
+                    onPress={handleSave} 
+                    activeOpacity={0.8}
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.saveBtnText}>{editItem ? 'Update' : 'Save'}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
                 {/* Delete button — only visible when editing and user is Admin */}
                 {editItem && isAdmin && (
                   <TouchableOpacity
@@ -370,8 +392,17 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cream, borderWidth: 1, borderColor: COLORS.border,
     borderRadius: 12, padding: 14, marginBottom: 14, fontSize: 15, color: COLORS.dark,
   },
-  saveBtn: { backgroundColor: COLORS.copper, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 6 },
+  actionRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
+  cancelBtn: { flex: 1, backgroundColor: COLORS.divider, padding: 16, borderRadius: 12, alignItems: 'center' },
+  cancelBtnText: { color: COLORS.dark, fontSize: 16, fontWeight: '700' },
+  saveBtn: { flex: 1, backgroundColor: COLORS.copper, padding: 16, borderRadius: 12, alignItems: 'center' },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  
+  roleSelector: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  roleOption: { flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center', backgroundColor: COLORS.cream },
+  roleOptionActive: { borderColor: COLORS.copper, backgroundColor: 'rgba(215, 114, 44, 0.1)' },
+  roleOptionText: { fontSize: 14, fontWeight: '600', color: COLORS.muted },
+  roleOptionTextActive: { color: COLORS.copper },
 
   deleteBtn: {
     backgroundColor: '#e53e3e', padding: 14, borderRadius: 12,

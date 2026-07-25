@@ -62,11 +62,45 @@ const requireAdmin = async (req, res, next) => {
 };
 
 // =========================================================
-// AUTH / LOGIN (Firebase Email Auth)
-// After Firebase verifies email+password on the client,
-// the mobile app sends the ID token here to get the
-// employee profile (role, department, etc.) from Firestore.
+// FCM PUSH NOTIFICATIONS HELPER
 // =========================================================
+const sendPushNotification = async (userId, title, body) => {
+    try {
+        const userDoc = await db.collection('employees').doc(userId).get();
+        if (!userDoc.exists) return;
+        const fcmToken = userDoc.data().fcm_token;
+        if (!fcmToken) return; // User hasn't registered a device token
+
+        await admin.messaging().send({
+            token: fcmToken,
+            notification: { title, body },
+            android: { priority: 'high' },
+            apns: { payload: { aps: { contentAvailable: true } } }
+        });
+        console.log(`Push sent to user ${userId}`);
+    } catch (err) {
+        console.error(`Failed to send push to ${userId}:`, err.message);
+    }
+};
+
+app.put('/api/employees/:id/fcm-token', verifyToken, async (req, res) => {
+    try {
+        const { fcm_token } = req.body;
+        if (req.user.uid !== req.params.id) {
+            const adminCheck = await db.collection('employees').doc(req.user.uid).get();
+            if (!adminCheck.exists || adminCheck.data().role !== 'Admin') {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
+        }
+        await db.collection('employees').doc(req.params.id).update({ fcm_token });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// =========================================================
+// AUTH / LOGIN (Firebase Email Auth)
 app.post('/api/login', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -113,7 +147,7 @@ app.post('/api/login', async (req, res) => {
 // =========================================================
 // DASHBOARD
 // =========================================================
-app.get('/api/dashboard', async (req, res) => {
+app.get('/api/dashboard', verifyToken, async (req, res) => {
     try {
         const [samplesSnap, employeesSnap, handoversSnap] = await Promise.all([
             db.collection('samples').get(),
@@ -140,7 +174,7 @@ app.get('/api/dashboard', async (req, res) => {
 // =========================================================
 // EMPLOYEES
 // =========================================================
-app.get('/api/employees', async (req, res) => {
+app.get('/api/employees', verifyToken, async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 0; // 0 = no limit (fetch all)
         let query = db.collection('employees').orderBy('employee_name');
@@ -262,25 +296,50 @@ app.delete('/api/employees/:id', verifyToken, requireAdmin, async (req, res) => 
 // =========================================================
 // SAMPLES
 // =========================================================
-app.get('/api/samples', async (req, res) => {
+app.get('/api/samples', verifyToken, async (req, res) => {
     try {
         const limitNum = parseInt(req.query.limit) || 0;
         const search = req.query.search ? req.query.search.toLowerCase() : '';
 
-        // Fetch all docs if searching, else optimize by fetching only needed
         let query = db.collection('samples').orderBy('created_at', 'desc');
 
-        const [samplesSnap, employeesSnap] = await Promise.all([
-            query.get(),
-            db.collection('employees').get()
-        ]);
+        // IF NO SEARCH: Use native Firestore pagination
+        if (!search && limitNum > 0) {
+            if (req.query.startAfter) {
+                const startDoc = await db.collection('samples').doc(req.query.startAfter).get();
+                if (startDoc.exists) query = query.startAfter(startDoc);
+            }
+            query = query.limit(limitNum + 1); // fetch 1 extra for hasMore
+            
+            const [samplesSnap, employeesSnap] = await Promise.all([query.get(), db.collection('employees').get()]);
+            const employeeMap = {};
+            employeesSnap.docs.forEach(doc => { employeeMap[doc.id] = doc.data().employee_name; });
 
+            const docs = samplesSnap.docs;
+            const hasMore = docs.length > limitNum;
+            const sliced = hasMore ? docs.slice(0, limitNum) : docs;
+
+            const rows = sliced.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id, ...data,
+                    created_at: data.created_at?.toDate?.() || data.created_at,
+                    current_holder_name: data.current_holder_id ? (employeeMap[data.current_holder_id] || null) : null
+                };
+            });
+            return res.json({ data: rows, hasMore });
+        }
+
+        // IF SEARCHING: Fallback to in-memory, but limit to prevent crashes
+        if (search) {
+            query = query.limit(1000); 
+        }
+        
+        const [samplesSnap, employeesSnap] = await Promise.all([query.get(), db.collection('employees').get()]);
         const employeeMap = {};
         employeesSnap.docs.forEach(doc => { employeeMap[doc.id] = doc.data().employee_name; });
 
         let allDocs = samplesSnap.docs;
-
-        // Apply Search in memory across all docs
         if (search) {
             allDocs = allDocs.filter(doc => {
                 const data = doc.data();
@@ -292,15 +351,13 @@ app.get('/api/samples', async (req, res) => {
             });
         }
 
-        // Apply Pagination manually in memory
         let paginatedDocs = allDocs;
         let hasMore = false;
         if (limitNum > 0) {
             let startIndex = 0;
             if (req.query.startAfter) {
                 startIndex = allDocs.findIndex(d => d.id === req.query.startAfter) + 1;
-                // If not found, default to 0
-                if (startIndex === 0) startIndex = 0; 
+                if (startIndex === 0) startIndex = 0;
             }
             paginatedDocs = allDocs.slice(startIndex, startIndex + limitNum);
             hasMore = startIndex + limitNum < allDocs.length;
@@ -309,8 +366,7 @@ app.get('/api/samples', async (req, res) => {
         const rows = paginatedDocs.map(doc => {
             const data = doc.data();
             return {
-                id: doc.id,
-                ...data,
+                id: doc.id, ...data,
                 created_at: data.created_at?.toDate?.() || data.created_at,
                 current_holder_name: data.current_holder_id ? (employeeMap[data.current_holder_id] || null) : null
             };
@@ -322,7 +378,7 @@ app.get('/api/samples', async (req, res) => {
     }
 });
 
-app.post('/api/samples', async (req, res) => {
+app.post('/api/samples', verifyToken, async (req, res) => {
     const { sample_name, style_number, developed_for, status } = req.body;
     try {
         const docRef = await db.collection('samples').add({
@@ -340,7 +396,7 @@ app.post('/api/samples', async (req, res) => {
     }
 });
 
-app.put('/api/samples/:id', async (req, res) => {
+app.put('/api/samples/:id', verifyToken, async (req, res) => {
     const { sample_name, style_number, developed_for } = req.body;
     try {
         await db.collection('samples').doc(req.params.id).update({
@@ -417,8 +473,8 @@ app.post('/api/samples/bulk', verifyToken, requireAdmin, async (req, res) => {
 // =========================================================
 // INITIATE TRANSFER (Handover / Batch / External Dispatch)
 // =========================================================
-app.post('/api/handover', async (req, res) => {
-    let { sample_id, sample_ids, from_employee_id, to_employee_id, department, remarks, is_external, external_vendor, courier_name, awb_number } = req.body;
+app.post('/api/handover', verifyToken, async (req, res) => {
+    let { sample_id, sample_ids, to_employee_id, department, remarks, is_external, external_vendor, courier_name, awb_number } = req.body;
     try {
         if (!sample_ids && sample_id) {
             sample_ids = [sample_id];
@@ -427,23 +483,31 @@ app.post('/api/handover', async (req, res) => {
             return res.status(400).json({ error: 'No samples provided for transfer.' });
         }
 
-        if (!is_external && from_employee_id && from_employee_id === to_employee_id) {
-            return res.status(400).json({ error: 'You cannot transfer samples to yourself.' });
-        }
-
         const batch = db.batch();
         let skipped = 0;
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
         const transactionIds = [];
+        
+        const samplesRefs = sample_ids.map(id => db.collection('samples').doc(id));
+        const samplesDocs = await db.getAll(...samplesRefs);
 
-        for (const s_id of sample_ids) {
+        for (let i = 0; i < samplesDocs.length; i++) {
+            const sDoc = samplesDocs[i];
+            if (!sDoc.exists) { skipped++; continue; }
+            const s_id = sDoc.id;
+            const real_from_employee_id = sDoc.data().current_holder_id || null;
+
+            if (!is_external && real_from_employee_id && real_from_employee_id === to_employee_id) {
+                skipped++; continue;
+            }
+
             const recentTransfersSnap = await db.collection('handovers')
                 .where('sample_id', '==', s_id)
                 .get();
             
             const recentCount = recentTransfersSnap.docs.filter(doc => {
                 const data = doc.data();
-                const senderMatches = (data.from_employee_id || '') === (from_employee_id || '');
+                const senderMatches = (data.from_employee_id || '') === (real_from_employee_id || '');
                 const isRecent = data.created_at && data.created_at.toDate() >= oneHourAgo;
                 return senderMatches && isRecent;
             }).length;
@@ -459,7 +523,7 @@ app.post('/api/handover', async (req, res) => {
             if (is_external) {
                 batch.set(txnRef, {
                     sample_id: s_id,
-                    from_employee_id: from_employee_id || null,
+                    from_employee_id: real_from_employee_id,
                     to_employee_id: 'EXTERNAL',
                     department: 'External Vendor / Courier',
                     remarks: remarks || '',
@@ -473,8 +537,7 @@ app.post('/api/handover', async (req, res) => {
                     created_at: new Date()
                 });
 
-                const sampleRef = db.collection('samples').doc(s_id);
-                batch.update(sampleRef, {
+                batch.update(sDoc.ref, {
                     current_holder_id: 'EXTERNAL',
                     current_holder_name: 'External: ' + external_vendor,
                     current_department: 'Dispatched via ' + courier_name + (awb_number ? ' (AWB: ' + awb_number + ')' : ''),
@@ -484,7 +547,7 @@ app.post('/api/handover', async (req, res) => {
             } else {
                 batch.set(txnRef, {
                     sample_id: s_id,
-                    from_employee_id: from_employee_id || null,
+                    from_employee_id: real_from_employee_id,
                     to_employee_id,
                     department,
                     remarks: remarks || '',
@@ -499,21 +562,18 @@ app.post('/api/handover', async (req, res) => {
         }
 
         if (transactionIds.length === 0) {
-            return res.status(429).json({ error: 'Rate limit exceeded for all selected samples.' });
+            return res.status(429).json({ error: 'All selected samples failed transfer rules or rate limits.' });
         }
 
         await batch.commit();
 
         if (!is_external) {
-            const senderDoc = from_employee_id ? await db.collection('employees').doc(from_employee_id).get() : null;
-            const senderName = senderDoc?.data()?.employee_name || 'Admin';
-
-            const firstSampleDoc = await db.collection('samples').doc(sample_ids[0]).get();
-            const firstSampleName = firstSampleDoc.data()?.sample_name || 'Item';
+            const firstSampleDoc = samplesDocs[0];
+            const firstSampleName = firstSampleDoc.exists ? firstSampleDoc.data().sample_name : 'Item';
             
-            let message = `${senderName} wants to transfer "${firstSampleName}" to you.`;
-            if (sample_ids.length > 1) {
-                message = `${senderName} wants to transfer ${sample_ids.length} samples to you.`;
+            let message = `You have ${transactionIds.length} new sample(s) pending transfer.`;
+            if (transactionIds.length === 1) {
+                message = `You have a new transfer pending for "${firstSampleName}".`;
             }
 
             const notifRef = db.collection('notifications').doc();
@@ -526,6 +586,7 @@ app.post('/api/handover', async (req, res) => {
                 read: false,
                 created_at: new Date()
             });
+            await sendPushNotification(to_employee_id, 'New Transfer Pending', message);
         }
 
         res.json({ 
@@ -541,7 +602,7 @@ app.post('/api/handover', async (req, res) => {
 // =========================================================
 // ACCEPT TRANSFER
 // =========================================================
-app.post('/api/handover/:id/accept', async (req, res) => {
+app.post('/api/handover/:id/accept', verifyToken, async (req, res) => {
     const transactionId = req.params.id;
     try {
         // ── SERVER-SIDE BARCODE VERIFICATION ENFORCEMENT ──
@@ -604,15 +665,17 @@ app.post('/api/handover/:id/accept', async (req, res) => {
             const receiver = receiverDoc.data();
             const sample = sampleDoc.data();
 
+            const msgBody = `${receiver?.employee_name || 'Someone'} accepted the transfer of "${sample?.sample_name || 'the sample'}".`;
             await db.collection('notifications').add({
                 user_id: txn.from_employee_id,
                 title: 'Transfer Accepted ✅',
-                message: `${receiver?.employee_name || 'Someone'} accepted the transfer of "${sample?.sample_name || 'the sample'}".`,
+                message: msgBody,
                 type: 'handover_accepted',
                 related_id: txn.sample_id,
                 read: false,
                 created_at: new Date()
             });
+            await sendPushNotification(txn.from_employee_id, 'Transfer Accepted ✅', msgBody);
         }
 
         res.json({ success: true, message: 'Transfer accepted. Sample ownership updated.' });
@@ -624,7 +687,7 @@ app.post('/api/handover/:id/accept', async (req, res) => {
 // =========================================================
 // REJECT TRANSFER
 // =========================================================
-app.post('/api/handover/:id/reject', async (req, res) => {
+app.post('/api/handover/:id/reject', verifyToken, async (req, res) => {
     const transactionId = req.params.id;
     const { rejection_reason } = req.body;
     try {
@@ -662,17 +725,19 @@ app.post('/api/handover/:id/reject', async (req, res) => {
 
             const adminsSnap = await db.collection('employees').where('role', '==', 'Admin').get();
             const alertBatch = db.batch();
+            const msgBody = `${rejectorName} has rejected ${recentRejectsCount} transfers in the last 24 hours. This may require attention.`;
             adminsSnap.forEach(adminDoc => {
                 const notifRef = db.collection('notifications').doc();
                 alertBatch.set(notifRef, {
                     user_id: adminDoc.id,
                     title: '⚠️ Frequent Rejections Alert',
-                    message: `${rejectorName} has rejected ${rejectHistory.size} transfers in the last 24 hours. This may require attention.`,
+                    message: msgBody,
                     type: 'admin_alert',
                     related_id: txn.to_employee_id,
                     read: false,
                     created_at: new Date()
                 });
+                sendPushNotification(adminDoc.id, '⚠️ Frequent Rejections Alert', msgBody);
             });
             await alertBatch.commit();
         }
@@ -707,7 +772,7 @@ app.post('/api/handover/:id/reject', async (req, res) => {
 // =========================================================
 // CANCEL TRANSFER (By Sender)
 // =========================================================
-app.post('/api/handover/:id/cancel', async (req, res) => {
+app.post('/api/handover/:id/cancel', verifyToken, async (req, res) => {
     const transactionId = req.params.id;
     try {
         const txnRef = db.collection('handovers').doc(transactionId);
@@ -754,7 +819,7 @@ app.post('/api/handover/:id/cancel', async (req, res) => {
 // =========================================================
 // PENDING TRANSFERS FOR EMPLOYEE
 // =========================================================
-app.get('/api/pending-transfers/:employeeId', async (req, res) => {
+app.get('/api/pending-transfers/:employeeId', verifyToken, async (req, res) => {
     try {
         const snapshot = await db.collection('handovers')
             .where('to_employee_id', '==', req.params.employeeId)
@@ -791,7 +856,7 @@ app.get('/api/pending-transfers/:employeeId', async (req, res) => {
 // =========================================================
 // MY SAMPLES (Employee Workspace)
 // =========================================================
-app.get('/api/my-samples/:employeeId', async (req, res) => {
+app.get('/api/my-samples/:employeeId', verifyToken, async (req, res) => {
     try {
         const snapshot = await db.collection('samples')
             .where('current_holder_id', '==', req.params.employeeId)
@@ -810,7 +875,7 @@ app.get('/api/my-samples/:employeeId', async (req, res) => {
 // =========================================================
 // SAMPLE TIMELINE / HISTORY
 // =========================================================
-app.get('/api/samples/:id/history', async (req, res) => {
+app.get('/api/samples/:id/history', verifyToken, async (req, res) => {
     try {
         const snapshot = await db.collection('handovers')
             .where('sample_id', '==', req.params.id)
@@ -899,7 +964,7 @@ app.post('/api/admin/send-excel', verifyToken, async (req, res) => {
 // =========================================================
 // NOTIFICATIONS
 // =========================================================
-app.get('/api/notifications/:employeeId', async (req, res) => {
+app.get('/api/notifications/:employeeId', verifyToken, async (req, res) => {
     try {
         const snapshot = await db.collection('notifications')
             .where('user_id', '==', req.params.employeeId)
@@ -926,7 +991,7 @@ app.get('/api/notifications/:employeeId', async (req, res) => {
     }
 });
 
-app.put('/api/notifications/:id/read', async (req, res) => {
+app.put('/api/notifications/:id/read', verifyToken, async (req, res) => {
     try {
         await db.collection('notifications').doc(req.params.id).update({ read: true });
         res.json({ success: true });
@@ -935,7 +1000,7 @@ app.put('/api/notifications/:id/read', async (req, res) => {
     }
 });
 
-app.put('/api/notifications/read-all/:employeeId', async (req, res) => {
+app.put('/api/notifications/read-all/:employeeId', verifyToken, async (req, res) => {
     try {
         const snapshot = await db.collection('notifications')
             .where('user_id', '==', req.params.employeeId)

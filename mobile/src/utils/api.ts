@@ -2,8 +2,7 @@ import { auth } from './firebaseConfig';
 import axios from 'axios';
 import { Platform } from 'react-native';
 
-// Production backend on Google Cloud Run (asia-south1 / Mumbai)
-const BASE_URL = 'https://gts-backend-163192454816.asia-south1.run.app/api';
+const BASE_URL = 'https://gts-backend-865187866696.asia-south1.run.app/api';
 
 const api = axios.create({ baseURL: BASE_URL });
 
@@ -67,6 +66,11 @@ export const updateEmployee = async (id: string, data: any) => {
 
 export const deleteEmployee = async (id: string) => {
     const response = await api.delete(`/employees/${id}`);
+    return response.data;
+};
+
+export const updateFcmToken = async (id: string, fcm_token: string) => {
+    const response = await api.put(`/employees/${id}/fcm-token`, { fcm_token });
     return response.data;
 };
 

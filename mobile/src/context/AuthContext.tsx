@@ -1,7 +1,8 @@
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '../utils/firebaseConfig';
-import { loginWithFirebase } from '../utils/api';
+import { loginWithFirebase, updateFcmToken } from '../utils/api';
+import messaging from '@react-native-firebase/messaging';
 
 export interface User {
   id: string;
@@ -36,6 +37,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const registerForPushNotifications = async (userId: string) => {
+    try {
+      const authStatus = await messaging().requestPermission();
+      const enabled =
+        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+        
+      if (enabled) {
+        const token = await messaging().getToken();
+        await updateFcmToken(userId, token);
+        console.log('FCM Token registered:', token);
+      }
+    } catch (error) {
+      console.warn('Failed to get FCM token:', error);
+    }
+  };
+
   useEffect(() => {
     // Listen to Firebase Auth state — fires immediately on app start
     // If Firebase has a saved session (AsyncStorage), it restores it here
@@ -45,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const result = await loginWithFirebase();
           setUser(result.user);
+          registerForPushNotifications(result.user.id);
         } catch (err) {
           // Profile fetch failed (e.g. backend down) — stay logged out
           console.warn('Auto-login failed:', err);
@@ -62,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = (userData: User) => {
     setUser(userData);
+    registerForPushNotifications(userData.id);
   };
 
   const logout = async () => {

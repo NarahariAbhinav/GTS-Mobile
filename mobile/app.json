@@ -23,17 +23,30 @@
           "cameraPermission": "Allow GTS to access your camera to scan garment barcodes."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "@react-native-firebase/app",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      "@react-native-firebase/messaging"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.abhinav031.GTS",
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/GTS_Logo.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.abhinav031.GTS"
+      "package": "com.skil01.Gts",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"

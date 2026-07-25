@@ -5,12 +5,13 @@ import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
-    apiKey: "AIzaSyDfVrBhU2s_vbPgUBZwsJiPrreX2X16peg",
-    authDomain: "garment-tracker-b9473.firebaseapp.com",
-    projectId: "garment-tracker-b9473",
-    storageBucket: "garment-tracker-b9473.firebasestorage.app",
-    messagingSenderId: "163192454816",
-    appId: "1:163192454816:web:4f6f5c52d3b5a703c153c5"
+    apiKey: "AIzaSyDlEd2FzCbTzuLWQHmV9NRc7hU3OJ_8dFo",
+    authDomain: "gtsmobileapp-71337.firebaseapp.com",
+    projectId: "gtsmobileapp-71337",
+    storageBucket: "gtsmobileapp-71337.firebasestorage.app",
+    messagingSenderId: "865187866696",
+    appId: "1:865187866696:web:6268cdce83b459a59b907d",
+    measurementId: "G-L42Y6JJPES"
 };
 
 // Initialize Firebase only once (prevent hot-reload issues)
