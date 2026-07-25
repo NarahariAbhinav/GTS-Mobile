@@ -81,7 +81,7 @@ export default function EmployeeMasterScreen() {
     setSaving(true);
     try {
       if (editItem) { await updateEmployee(editItem.id, form); }
-      else { await addEmployee({ ...form, password: form.password || '1234' }); }
+      else { await addEmployee({ ...form, password: form.password || '123456' }); }
       setModalVisible(false);
       fetchEmployees();
     } catch (error: any) {
@@ -238,8 +238,8 @@ export default function EmployeeMasterScreen() {
                   <>
                     <Text style={styles.fieldLabel}>Work Email *</Text>
                     <TextInput style={styles.input} value={form.email} onChangeText={(t) => setForm({ ...form, email: t })} placeholder="e.g. rahul@company.com" placeholderTextColor={COLORS.placeholder} autoCapitalize="none" keyboardType="email-address" />
-                    <Text style={styles.fieldLabel}>Password (default: 1234)</Text>
-                    <TextInput style={styles.input} value={form.password} onChangeText={(t) => setForm({ ...form, password: t })} placeholder="Leave blank for default '1234'" placeholderTextColor={COLORS.placeholder} secureTextEntry />
+                    <Text style={styles.fieldLabel}>Password (default: 123456)</Text>
+                    <TextInput style={styles.input} value={form.password} onChangeText={(t) => setForm({ ...form, password: t })} placeholder="Leave blank for default '123456'" placeholderTextColor={COLORS.placeholder} secureTextEntry />
                     <View style={styles.authNoteBox}>
                       <Feather name="info" size={12} color={COLORS.denim} />
                       <Text style={styles.authNoteText}>A Firebase login account will be automatically created for this employee.</Text>

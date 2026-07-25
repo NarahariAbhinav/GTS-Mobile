@@ -21,5 +21,7 @@ veda
 !.env.example
 backend/firebase-key.json
 firebase-key.json
+*-firebase-adminsdk-*.json
+google-services (*).json
 *.xlsx
 *.csv

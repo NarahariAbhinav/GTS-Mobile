@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getMySamples, getPendingTransfers, rejectTransfer, acceptTransfer, getSamples, getNotifications, sendExcelReportEmail } from '../utils/api';
+import { getMySamples, getPendingTransfers, rejectTransfer, acceptTransfer, getSamples, getNotifications, sendExcelReportEmail, getMyTransferHistory } from '../utils/api';
 import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -15,6 +15,7 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [transferHistory, setTransferHistory] = useState<any[]>([]);
 
   const [notifications, setNotifications] = useState<any[]>([]);
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -22,14 +23,16 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
   const fetchData = async () => {
     if (!user) return;
     try {
-      const [samples, transfers, notifs] = await Promise.all([
+      const [samples, transfers, notifs, history] = await Promise.all([
         getMySamples(user.id), 
         getPendingTransfers(user.id),
-        getNotifications(user.id).catch(() => [])
+        getNotifications(user.id).catch(() => []),
+        getMyTransferHistory(user.id).catch(() => [])
       ]);
       setMySamples(samples);
       setPendingTransfers(transfers);
       if (notifs) setNotifications(notifs);
+      if (history) setTransferHistory(history);
     } catch (error) { console.error(error); }
     finally { setLoading(false); }
   };
@@ -45,8 +48,12 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
   const openRejectModal = (txnId: string) => { setRejectingId(txnId); setRejectReason(''); setRejectModalVisible(true); };
   const handleReject = async () => {
     if (!rejectingId) return;
+    if (!rejectReason || !rejectReason.trim()) {
+      Alert.alert('Validation Error', 'Please enter a mandatory reason for rejecting this sample.');
+      return;
+    }
     try {
-      await rejectTransfer(rejectingId, rejectReason || undefined);
+      await rejectTransfer(rejectingId, rejectReason.trim());
       setRejectModalVisible(false);
       Alert.alert('Rejected', 'Transfer has been rejected. Sample stays with sender.');
       fetchData();
@@ -198,6 +205,34 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
             </TouchableOpacity>
           ))
         )}
+
+        {/* Recent & Rejected Handovers */}
+        <View style={[styles.sectionHeader, { marginTop: 24 }]}><Text style={styles.sectionTitle}>Recent & Rejected Handovers</Text></View>
+        {transferHistory.length === 0 ? (
+          <View style={styles.emptyState}><Feather name="clock" size={28} color={COLORS.border} /><Text style={styles.emptyText}>No recent handover activity found</Text></View>
+        ) : (
+          transferHistory.map((item: any) => {
+            const isReject = item.transfer_status === 'Rejected';
+            return (
+              <View key={item.id} style={[styles.sampleRow, isReject && { borderColor: COLORS.dangerLight, borderWidth: 1, backgroundColor: COLORS.warmWhite }]}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <Text style={styles.sampleName}>{item.sample_name}</Text>
+                    <View style={[styles.statusDot, { backgroundColor: isReject ? COLORS.danger : item.transfer_status === 'Accepted' ? COLORS.emerald : COLORS.denim }]} />
+                    <Text style={[styles.sampleStatus, isReject && { color: COLORS.danger, fontWeight: '700' }]}>{item.transfer_status}</Text>
+                  </View>
+                  <Text style={styles.sampleSub}>From: {item.from_employee_name} ➔ To: {item.to_employee_name}</Text>
+                  {isReject && item.rejection_reason ? (
+                    <Text style={{ fontSize: 13, color: COLORS.danger, fontWeight: '600', marginTop: 4 }}>
+                      ⚠️ Reject Reason: "{item.rejection_reason}"
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            );
+          })
+        )}
+
         <View style={{ height: 120 }} />
       </ScrollView>
 
@@ -210,8 +245,8 @@ export default function EmployeeWorkspaceScreen({ navigation }: any) {
                 <Text style={styles.modalTitle}>Reject Transfer</Text>
                 <TouchableOpacity onPress={() => setRejectModalVisible(false)}><Feather name="x" size={22} color={COLORS.muted} /></TouchableOpacity>
               </View>
-              <Text style={styles.fieldLabel}>Reason (Optional)</Text>
-              <TextInput style={styles.input} placeholder="e.g. Not the correct sample" value={rejectReason} onChangeText={setRejectReason} placeholderTextColor={COLORS.placeholder} multiline />
+              <Text style={[styles.fieldLabel, { color: COLORS.danger, fontWeight: '600' }]}>Reason for Rejection * (Required)</Text>
+              <TextInput style={styles.input} placeholder="e.g. Not the correct sample / defective" value={rejectReason} onChangeText={setRejectReason} placeholderTextColor={COLORS.placeholder} multiline />
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setRejectModalVisible(false)}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.modalRejectBtn} onPress={handleReject}><Text style={styles.modalRejectText}>Confirm Reject</Text></TouchableOpacity>

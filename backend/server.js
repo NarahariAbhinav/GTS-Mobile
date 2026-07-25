@@ -209,7 +209,7 @@ app.post('/api/employees', verifyToken, requireAdmin, async (req, res) => {
         // 1. Auto-create Firebase Auth account for this employee
         const authUser = await admin.auth().createUser({
             email: email,
-            password: password || '1234',       // default password
+            password: password || '123456',       // default password (min 6 chars for Firebase)
             displayName: employee_name,
         });
 
@@ -235,7 +235,7 @@ app.post('/api/employees', verifyToken, requireAdmin, async (req, res) => {
             phone_number, 
             role: role || 'Employee',
             email_report_enabled: email_report_enabled || false,
-            message: `Firebase account created for ${email}. Default password: ${password || '1234'}`
+            message: `Firebase account created for ${email}. Default password: ${password || '123456'}`
         });
     } catch (err) {
         // Handle duplicate email error
@@ -873,6 +873,53 @@ app.get('/api/my-samples/:employeeId', verifyToken, async (req, res) => {
 });
 
 // =========================================================
+// RECENT & REJECTED TRANSFER HISTORY FOR EMPLOYEE
+// =========================================================
+app.get('/api/my-transfer-history/:employeeId', verifyToken, async (req, res) => {
+    const empId = req.params.employeeId;
+    try {
+        const [fromSnap, toSnap] = await Promise.all([
+            db.collection('handovers').where('from_employee_id', '==', empId).get(),
+            db.collection('handovers').where('to_employee_id', '==', empId).get()
+        ]);
+
+        const docsMap = new Map();
+        fromSnap.docs.forEach(doc => docsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+        toSnap.docs.forEach(doc => docsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+
+        const allTransfers = Array.from(docsMap.values())
+            .filter(t => t.transfer_status === 'Rejected' || t.transfer_status === 'Accepted' || t.transfer_status === 'Cancelled')
+            .map(t => ({
+                ...t,
+                handover_date: t.handover_date?.toDate?.() || t.handover_date,
+                rejected_at: t.rejected_at?.toDate?.() || t.rejected_at
+            }))
+            .sort((a, b) => {
+                const timeA = new Date(b.rejected_at || b.handover_date || 0).getTime();
+                const timeB = new Date(a.rejected_at || a.handover_date || 0).getTime();
+                return timeA - timeB;
+            })
+            .slice(0, 15);
+
+        const enriched = await Promise.all(allTransfers.map(async txn => {
+            const [fromDoc, toDoc] = await Promise.all([
+                txn.from_employee_id ? db.collection('employees').doc(txn.from_employee_id).get() : Promise.resolve(null),
+                txn.to_employee_id ? db.collection('employees').doc(txn.to_employee_id).get() : Promise.resolve(null)
+            ]);
+            return {
+                ...txn,
+                from_employee_name: fromDoc?.data()?.employee_name || 'System',
+                to_employee_name: toDoc?.data()?.employee_name || 'Unknown'
+            };
+        }));
+
+        res.json(enriched);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// =========================================================
 // SAMPLE TIMELINE / HISTORY
 // =========================================================
 app.get('/api/samples/:id/history', verifyToken, async (req, res) => {
@@ -930,7 +977,10 @@ app.post('/api/admin/send-report', verifyToken, async (req, res) => {
         const inProduction = samples.filter(s => s.status === 'In Production').length;
         const dispatched = samples.filter(s => s.status === 'Dispatched' || s.status === 'Ready for Dispatch').length;
 
-        await sendDailyManagerReport(email, totalSamples, pendingQA, inProduction, dispatched);
+        const emailRes = await sendDailyManagerReport(email, totalSamples, pendingQA, inProduction, dispatched);
+        if (!emailRes.success) {
+            return res.status(500).json({ error: emailRes.error || 'Failed to send daily manager report via Nodemailer.' });
+        }
         res.json({ success: true, message: 'Daily report sent successfully via Email!' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -954,7 +1004,10 @@ app.post('/api/admin/send-excel', verifyToken, async (req, res) => {
         }
 
         const { sendExcelReport } = require('./emailService');
-        await sendExcelReport(email, csvData);
+        const emailRes = await sendExcelReport(email, csvData);
+        if (!emailRes.success) {
+            return res.status(500).json({ error: emailRes.error || 'Failed to send Excel CSV report via Nodemailer.' });
+        }
         res.json({ success: true, message: 'Excel report sent successfully via Email!' });
     } catch (err) {
         res.status(500).json({ error: err.message });

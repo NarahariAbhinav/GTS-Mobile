@@ -13,9 +13,9 @@ const transporter = nodemailer.createTransport({
 const sendDailyManagerReport = async (toEmail, totalSamples, pendingQA, inProduction, dispatched) => {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
         console.warn('Nodemailer is not configured. Missing SMTP_USER or SMTP_PASS in .env');
-        return false;
+        return { success: false, error: 'SMTP credentials missing on server (SMTP_USER/PASS not set in environment)' };
     }
-    if (!toEmail) return false;
+    if (!toEmail) return { success: false, error: 'Recipient email address is missing' };
 
     const htmlContent = `
         <!DOCTYPE html>
@@ -73,16 +73,18 @@ const sendDailyManagerReport = async (toEmail, totalSamples, pendingQA, inProduc
             html: htmlContent,
         });
         console.log(`Email sent successfully to ${toEmail}`);
-        return true;
+        return { success: true };
     } catch (error) {
         console.error('Exception sending Email via Nodemailer:', error);
-        return false;
+        return { success: false, error: error.message || 'Exception sending Email via Nodemailer' };
     }
 };
 
 const sendExcelReport = async (toEmail, csvData) => {
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return false;
-    if (!toEmail) return false;
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        return { success: false, error: 'SMTP credentials missing on server (SMTP_USER/PASS not set in environment)' };
+    }
+    if (!toEmail) return { success: false, error: 'Recipient email address is missing' };
 
     try {
         await transporter.sendMail({
@@ -99,10 +101,10 @@ const sendExcelReport = async (toEmail, csvData) => {
             ]
         });
         console.log(`Excel Email sent successfully to ${toEmail}`);
-        return true;
+        return { success: true };
     } catch (error) {
         console.error('Exception sending Excel Email via Nodemailer:', error);
-        return false;
+        return { success: false, error: error.message || 'Exception sending Excel Email via Nodemailer' };
     }
 };
 

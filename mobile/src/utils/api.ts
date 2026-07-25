@@ -136,6 +136,12 @@ export const getMySamples = async (employeeId: string) => {
     return response.data;
 };
 
+// === MY TRANSFER HISTORY (Recent & Rejected) ===
+export const getMyTransferHistory = async (employeeId: string) => {
+    const response = await api.get(`/my-transfer-history/${employeeId}`);
+    return response.data;
+};
+
 // === TIMELINE ===
 export const getSampleHistory = async (id: string) => {
     const response = await api.get(`/samples/${id}/history`);
